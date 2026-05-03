@@ -5,21 +5,34 @@ sdk: org.gnome.Sdk
 command: papyrus
 
 finish-args:
-  # Wayland access for mpvpaper layer shell
   - --socket=wayland
-  # GPU access for mpvpaper OpenGL rendering
   - --device=dri
-  # Access to home directory for wallpaper videos
   - --filesystem=home
-  # Access to COSMIC theme config files
   - --filesystem=~/.config/cosmic:rw
-  # Allow talking to the session bus (for future dbus support)
   - --socket=session-bus
-  # Share IPC namespace (required for Wayland shared memory)
   - --share=ipc
 
 modules:
-  # ── mpv (required by mpvpaper) ─────────────────────────────────────────────
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Dvulkan=disabled
+      - -Dglslang=disabled
+      - -Ddemos=false
+    sources:
+      - type: git
+        url: https://code.videolan.org/videolan/libplacebo.git
+        tag: v7.349.0
+        disable-submodules: false
+
+  - name: libass
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.xz
+        sha256: eae425da50f0015c21f7b3a9c7262a910f0218af469e22e2931462fed3c50959
+
   - name: libmpv
     cleanup:
       - /include
@@ -35,7 +48,6 @@ modules:
         url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.38.0.tar.gz
         sha256: 86d9ef40b6058732f67b46d0bbda24a074fae860b3eaae05bab3145041303066
 
-  # ── mpvpaper ───────────────────────────────────────────────────────────────
   - name: mpvpaper
     buildsystem: meson
     config-opts:
@@ -45,27 +57,30 @@ modules:
         url: https://github.com/GhostNaN/mpvpaper.git
         branch: master
 
-  # ── Python dependencies ────────────────────────────────────────────────────
+  - name: python3-pybind11
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-build-isolation --no-deps --find-links="file://${PWD}" --prefix=/app pybind11-2.13.6.tar.gz
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/source/p/pybind11/pybind11-2.13.6.tar.gz
+        sha256: ba6af10348c12b24e92fa086b39cfba0eff619b61ac77c406167d813b096d39a
+
   - name: python3-pillow
     buildsystem: simple
     build-commands:
-      - pip3 install --no-index --find-links="file://${PWD}" --prefix=/app pillow
+      - pip3 install --no-index --no-build-isolation --no-deps --find-links="file://${PWD}" --prefix=/app pillow-10.4.0.tar.gz
     sources:
       - type: file
-        url: https://files.pythonhosted.org/packages/source/P/Pillow/Pillow-10.3.0.tar.gz
-        sha256: 9d2455fbf44c914840c793e89aa82d0e1763a14253a000743a384d6cfa31adc5
+        url: https://files.pythonhosted.org/packages/source/p/pillow/pillow-10.4.0.tar.gz
+        sha256: 166c1cd4d24309b30d61f79f4a9114b7b2313d7450912277855ff5dfd7cd4a06
 
-  # ── Papyrus itself ─────────────────────────────────────────────────────────
   - name: papyrus
     buildsystem: simple
     build-commands:
-      # install the main script
       - install -Dm755 papyrus.py /app/bin/papyrus
-      # install the desktop entry
       - install -Dm644 io.github.PSGtatitos.papyrus.desktop /app/share/applications/io.github.PSGtatitos.papyrus.desktop
-      # install the icon at multiple sizes
       - install -Dm644 assets/icon.png /app/share/icons/hicolor/256x256/apps/io.github.PSGtatitos.papyrus.png
-      # install appstream metainfo
       - install -Dm644 io.github.PSGtatitos.papyrus.metainfo.xml /app/share/metainfo/io.github.PSGtatitos.papyrus.metainfo.xml
     sources:
       - type: git
