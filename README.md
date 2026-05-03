@@ -20,7 +20,7 @@ It also automatically extracts the dominant color from your wallpaper and applie
 - 🎬 **Animated wallpapers** — supports MP4, WebM, MKV, AVI, MOV
 - 🎨 **Auto-theme** — extracts accent color from wallpaper and applies it to COSMIC
 - 🌙 **Auto dark/light mode** — detects wallpaper brightness and switches accordingly
-- 📁 **Multi-folder support** — add as many wallpaper folders as you want
+- 📁 **Folder picker** — choose any folder of video files to scan
 - 🖼️ **Thumbnail previews** — auto-generated from your video files
 - 🔁 **Start on login** — one toggle to persist your wallpaper across reboots
 - 🚫 **No telemetry, no accounts, no cloud** — config is a plain JSON file
@@ -32,18 +32,18 @@ It also automatically extracts the dominant color from your wallpaper and applie
 ## Requirements
 
 - Pop!_OS 24.04 with COSMIC desktop
-- `mpvpaper` (see install instructions)
+- `mpvpaper` (installed automatically)
 - `ffmpeg`
 - Python 3.10+
 - `python3-gi`, GTK4, libadwaita
 
 ## Installation
 
-### Quick install (recommended)
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PSGtatitos/papyrus/main/install.sh | bash
 ```
+
+The install script handles everything — system dependencies, mpvpaper, Pillow, and the app itself.
 
 ### Manual install
 
@@ -84,7 +84,7 @@ papyrus
 ```
 
 - **Click** any thumbnail to set it as your wallpaper
-- **Add folder** button (top left) to add a folder of video files
+- **Folder** button (top left) to change the wallpaper folder
 - **Auto-theme DE** toggle to enable/disable automatic COSMIC theming
 - **Start on login** toggle to persist wallpaper across reboots
 - **Stop** button (top right) to remove the wallpaper
@@ -124,8 +124,8 @@ Config is stored at `~/.config/papyrus/config.json`:
 
 ```json
 {
-  "current": "/home/user/Downloads/my-wallpaper.mp4",
-  "dirs": ["/home/user/Downloads", "/home/user/Videos"],
+  "current": "/home/user/Wallpapers/Papyrus/my-wallpaper.mp4",
+  "dirs": ["/home/user/Wallpapers/Papyrus"],
   "output": "HDMI-A-1",
   "auto_theme": true
 }
