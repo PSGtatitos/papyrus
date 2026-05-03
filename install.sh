@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
 set -e
 
-REPO="https://github.com/PSGtatitos/papyrus"
+REPO_RAW="https://raw.githubusercontent.com/PSGtatitos/papyrus/main"
 INSTALL_DIR="$HOME/.local/bin"
-APP_DIR="$HOME/.local/share/papyrus"
 DESKTOP_DIR="$HOME/.local/share/applications"
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
 info()    { echo -e "${CYAN}[papyrus]${NC} $1"; }
 success() { echo -e "${GREEN}[papyrus]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[papyrus]${NC} $1"; }
-error()   { echo -e "${RED}[papyrus]${NC} $1"; exit 1; }
 
 echo ""
 echo -e "${CYAN}"
@@ -30,7 +27,7 @@ echo -e "${NC}"
 echo "  Animated wallpaper manager for COSMIC"
 echo ""
 
-# ── check OS ─────────────────────────────────────────────────────────────────
+# ── check OS ──────────────────────────────────────────────────────────────────
 if ! grep -qi "pop" /etc/os-release 2>/dev/null; then
     warn "This app is designed for Pop!_OS COSMIC. Continuing anyway..."
 fi
@@ -70,19 +67,15 @@ fi
 
 # ── install Papyrus ───────────────────────────────────────────────────────────
 info "Installing Papyrus..."
-mkdir -p "$INSTALL_DIR" "$APP_DIR" "$DESKTOP_DIR" "$ICON_DIR"
+mkdir -p "$INSTALL_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
-# copy script
-cp papyrus.py "$INSTALL_DIR/papyrus"
+# download script directly from GitHub
+curl -fsSL "$REPO_RAW/papyrus.py" -o "$INSTALL_DIR/papyrus"
 chmod +x "$INSTALL_DIR/papyrus"
 
-# copy icon if present
-if [ -f "assets/icon.png" ]; then
-    cp assets/icon.png "$ICON_DIR/io.github.papyrus.png"
-    ICON="io.github.papyrus"
-else
-    ICON="video-display"
-fi
+# download icon
+curl -fsSL "$REPO_RAW/assets/icon.png" -o "$ICON_DIR/io.github.papyrus.png"
+ICON="io.github.papyrus"
 
 # desktop entry
 cat > "$DESKTOP_DIR/io.github.papyrus.desktop" << DESKTOP
