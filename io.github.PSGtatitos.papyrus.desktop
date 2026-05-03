@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Papyrus
-Comment=Animated wallpaper manager for Pop!_OS COSMIC
-Exec=papyrus
-Icon=io.github.PSGtatitos.papyrus
-Terminal=false
-Categories=Utility;GTK;
-Keywords=wallpaper;animated;video;COSMIC;live;
