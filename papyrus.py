@@ -411,12 +411,10 @@ class CWApp(Adw.Application):
         try:
             folder = dialog.select_folder_finish(result)
             path = folder.get_path()
-            dirs = self.cfg.get("dirs", [])
-            if path not in dirs:
-                dirs.append(path)
-                self.cfg["dirs"] = dirs
-                save_config(self.cfg)
-                self._populate()
+            # replace all dirs with just this folder
+            self.cfg["dirs"] = [path]
+            save_config(self.cfg)
+            self._populate()
         except Exception:
             pass
 
