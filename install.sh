@@ -92,6 +92,12 @@ DESKTOP
 
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 
+# create default wallpaper folder
+WALLPAPER_DIR="$HOME/Wallpapers/Papyrus"
+mkdir -p "$WALLPAPER_DIR"
+success "Wallpaper folder created at $WALLPAPER_DIR"
+info "Drop your video files there and Papyrus will find them automatically."
+
 # ensure ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     warn "~/.local/bin is not in your PATH."

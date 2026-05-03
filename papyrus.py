@@ -22,10 +22,10 @@ from pathlib import Path
 CONFIG_DIR    = Path.home() / ".config" / "papyrus"
 CONFIG_FILE   = CONFIG_DIR / "config.json"
 AUTOSTART     = Path.home() / ".config" / "autostart" / "papyrus.desktop"
-DEFAULT_DIRS  = [Path.home() / "Downloads", Path.home() / "Videos", Path.home() / "Pictures"]
+DEFAULT_DIRS  = [Path.home() / "Wallpapers" / "Papyrus", Path.home() / "Downloads", Path.home() / "Videos", Path.home() / "Pictures"]
 VIDEO_EXTS    = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
 
-# COSMIC compiled theme paths
+# COSMIC compiled theme paths (not Builder — the actual theme COSMIC reads)
 COSMIC_DARK   = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark/v1"
 COSMIC_LIGHT  = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light/v1"
 COSMIC_DARK_B = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark.Builder/v1"
@@ -124,6 +124,7 @@ def c(r, g, b, a=1.0):
     return f"(\n        red: {r:.7f},\n        green: {g:.7f},\n        blue: {b:.7f},\n        alpha: {a:.1f},\n    )"
 
 def write_accent(path: Path, r, g, b):
+    """Write the full compiled accent file COSMIC expects."""
     dr, dg, db = darken(r, g, b, 0.85)
     pr, pg, pb = darken(r, g, b, 0.55)
     path.write_text(f"""(
@@ -142,6 +143,7 @@ def write_accent(path: Path, r, g, b):
 )""")
 
 def write_background(path: Path, r, g, b, is_dark: bool):
+    """Write the full compiled background file COSMIC expects."""
     if is_dark:
         br, bg_, bb = darken(r, g, b, 0.15)
         br, bg_, bb = max(br, 0.08), max(bg_, 0.08), max(bb, 0.08)
@@ -172,42 +174,36 @@ def write_background(path: Path, r, g, b, is_dark: bool):
 )""")
 
 def write_builder_accent(path: Path, r, g, b):
+    """Also update the Builder accent so COSMIC Settings stays in sync."""
     path.write_text(f"Some((\n    red: {r:.7f},\n    green: {g:.7f},\n    blue: {b:.7f},\n))")
 
 def apply_cosmic_theme(thumb_path):
     color, is_dark = extract_palette(thumb_path)
     if color is None:
-        print("[papyrus] palette extraction failed")
         return False
 
     r, g, b = color
     print(f"[papyrus] accent: r={r:.3f} g={g:.3f} b={b:.3f} dark={is_dark}")
 
-    try:
-        # Write to compiled theme (what COSMIC actually reads)
-        target = COSMIC_DARK if is_dark else COSMIC_LIGHT
-        target.mkdir(parents=True, exist_ok=True)
+    # write to compiled theme (what COSMIC actually reads)
+    target = COSMIC_DARK if is_dark else COSMIC_LIGHT
+    target.mkdir(parents=True, exist_ok=True)
+    write_accent(target / "accent", r, g, b)
+    write_background(target / "background", r, g, b, is_dark)
+    (target / "is_dark").write_text("true" if is_dark else "false")
 
-        write_accent(target / "accent", r, g, b)
-        write_background(target / "background", r, g, b, is_dark)
-        (target / "is_dark").write_text("true" if is_dark else "false")
+    # also update builder so Settings UI reflects the change
+    builder = COSMIC_DARK_B if is_dark else COSMIC_LIGHT_B
+    builder.mkdir(parents=True, exist_ok=True)
+    write_builder_accent(builder / "accent", r, g, b)
 
-        # Update Builder so Settings UI stays in sync
-        builder = COSMIC_DARK_B if is_dark else COSMIC_LIGHT_B
-        builder.mkdir(parents=True, exist_ok=True)
-        write_builder_accent(builder / "accent", r, g, b)
+    # set dark/light mode
+    COSMIC_MODE.mkdir(parents=True, exist_ok=True)
+    (COSMIC_MODE / "is_dark").write_text("true" if is_dark else "false")
+    (COSMIC_MODE / "auto_switch").write_text("false")
 
-        # Set dark/light mode
-        COSMIC_MODE.mkdir(parents=True, exist_ok=True)
-        (COSMIC_MODE / "is_dark").write_text("true" if is_dark else "false")
-        (COSMIC_MODE / "auto_switch").write_text("false")
 
-        print("[papyrus] theme applied successfully")
-        return True
-
-    except Exception as e:
-        print(f"[papyrus] theme write error: {e}")
-        return False
+    return True
 
 # ── video scanning ────────────────────────────────────────────────────────────
 def scan_videos(dirs):
@@ -235,15 +231,6 @@ def short_name(path: Path, n=22):
     s = path.stem
     return s[:n] + "\u2026" if len(s) > n else s
 
-# ── emergency recovery ───────────────────────────────────────────────────────
-def emergency_reset():
-    """Restore panel and dock if they disappear."""
-    print("[papyrus] running emergency reset...")
-    subprocess.run(["pkill", "-f", "cosmic-panel"], capture_output=True)
-    subprocess.run(["pkill", "-f", "cosmic-dock"], capture_output=True)
-    subprocess.run(["cosmic-panel"], capture_output=True)
-    subprocess.run(["cosmic-dock"], capture_output=True)
-
 # ── app ───────────────────────────────────────────────────────────────────────
 class CWApp(Adw.Application):
     def __init__(self):
@@ -267,10 +254,6 @@ class CWApp(Adw.Application):
         add_btn = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Add folder")
         add_btn.connect("clicked", self._add_folder)
         hb.pack_start(add_btn)
-
-        reset_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Emergency Reset (panel/dock)")
-        reset_btn.connect("clicked", lambda *_: emergency_reset())
-        hb.pack_start(reset_btn)
 
         stop_btn = Gtk.Button(icon_name="media-playback-stop-symbolic", tooltip_text="Stop wallpaper")
         stop_btn.connect("clicked", self._stop)
