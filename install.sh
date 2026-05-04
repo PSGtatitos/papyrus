@@ -47,7 +47,7 @@ sudo apt install -y \
     libwayland-dev
 
 info "Installing Pillow..."
-pip install pillow --break-system-packages --quiet
+pip3 install pillow --break-system-packages --quiet 2>/dev/null || python3 -m pip install pillow --break-system-packages --quiet
 
 # ── mpvpaper ──────────────────────────────────────────────────────────────────
 if command -v mpvpaper &>/dev/null; then
