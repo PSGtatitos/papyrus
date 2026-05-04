@@ -91,7 +91,7 @@ def extract_palette(thumb_path):
 
         img = Image.open(thumb_path).convert("RGB")
         img = img.resize((200, 200))
-        pixels = list(img.getdata())
+        pixels = [(p[0], p[1], p[2]) for p in img.getdata()]
 
         best_vibrancy = -1
         best_color = (1.0, 0.5, 0.0)
