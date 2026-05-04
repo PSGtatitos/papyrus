@@ -25,10 +25,6 @@ It also automatically extracts the dominant color from your wallpaper and applie
 - 🔁 **Start on login** — one toggle to persist your wallpaper across reboots
 - 🚫 **No telemetry, no accounts, no cloud** — config is a plain JSON file
 
-## Screenshots
-
-> *Coming soon*
-
 ## Requirements
 
 - Pop!_OS 24.04 with COSMIC desktop
@@ -144,6 +140,8 @@ update-desktop-database ~/.local/share/applications
 ## Contributing
 
 Pull requests are welcome. For major changes, open an issue first.
+
+Built with assistance from: Claude (Anthropic) was used as a coding assistant during development.
 
 ## License
 
