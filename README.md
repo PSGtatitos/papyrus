@@ -130,6 +130,16 @@ Config is stored at `~/.config/papyrus/config.json`:
   "auto_theme": true
 }
 ```
+## Uninstall
+
+```bash
+rm ~/.local/bin/papyrus
+rm ~/.local/share/applications/io.github.papyrus.desktop
+rm ~/.local/share/icons/hicolor/256x256/apps/io.github.papyrus.png
+rm -rf ~/.config/papyrus
+rm -f ~/.config/autostart/papyrus.desktop
+update-desktop-database ~/.local/share/applications
+```
 
 ## Contributing
 
