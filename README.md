@@ -34,7 +34,13 @@ It also automatically extracts the dominant color from your wallpaper and applie
 - `python3-gi`, GTK4, libadwaita
 
 ## Installation
+First make sure that you have pip3 installed, if you don't have it you can install it via these commands:
 
+```bash
+sudo apt update
+sudo apt install python3-pip
+```
+And then run the installer:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PSGtatitos/papyrus/main/install.sh | bash
 ```
