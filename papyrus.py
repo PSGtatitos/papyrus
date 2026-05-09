@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 # ── version ───────────────────────────────────────────────────────────────────
-VERSION      = "1.0.0"
+VERSION      = "1.0.1"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 
