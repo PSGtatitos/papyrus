@@ -16,7 +16,37 @@ from gi.repository import Gtk, Adw, Gio
 import subprocess
 import json
 import shutil
+import threading
+import urllib.request
 from pathlib import Path
+
+# ── version ───────────────────────────────────────────────────────────────────
+VERSION      = "1.0.0"
+API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
+RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
+
+def check_for_updates(callback):
+    """Check GitHub for a newer release in a background thread."""
+    from gi.repository import GLib
+
+    def _check():
+        try:
+            req = urllib.request.Request(
+                API_URL,
+                headers={"User-Agent": f"papyrus/{VERSION}"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = json.loads(r.read().decode())
+                latest = data.get("tag_name", "").lstrip("v")
+                if not latest:
+                    return
+                current = [int(x) for x in VERSION.split(".")]
+                remote  = [int(x) for x in latest.split(".")]
+                if remote > current:
+                    GLib.idle_add(callback, latest)
+        except Exception as e:
+            print(f"[papyrus] update check failed: {e}")
+    threading.Thread(target=_check, daemon=True).start()
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 CONFIG_DIR    = Path.home() / ".config" / "papyrus"
@@ -91,7 +121,7 @@ def extract_palette(thumb_path):
 
         img = Image.open(thumb_path).convert("RGB")
         img = img.resize((200, 200))
-        pixels = [(p[0], p[1], p[2]) for p in img.getdata()]
+        pixels = list(img.getdata())
 
         best_vibrancy = -1
         best_color = (1.0, 0.5, 0.0)
@@ -309,6 +339,7 @@ class CWApp(Adw.Application):
             self.banner.set_title(f"Active: {Path(current).name}")
 
         self.win.present()
+        check_for_updates(self._on_update_available)
 
     def _populate(self):
         while child := self.flow.get_first_child():
@@ -418,6 +449,16 @@ class CWApp(Adw.Application):
         except Exception:
             pass
 
+
+    def _on_update_available(self, latest: str):
+        self.banner.set_title(f"Update available: v{latest} — click to download")
+        self.banner.set_button_label("Download")
+        self.banner.connect("button-clicked", lambda _: self._open_releases())
+        self.banner.set_revealed(True)
+
+    def _open_releases(self):
+        import subprocess
+        subprocess.Popen(["xdg-open", RELEASES_URL])
 
 if __name__ == "__main__":
     if not shutil.which("mpvpaper"):
