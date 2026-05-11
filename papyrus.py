@@ -266,7 +266,7 @@ class CWApp(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id="io.github.PSGtatitos.papyrus",
-            flags=Gio.ApplicationFlags.FLAGS_NONE,
+            flags=Gio.ApplicationFlags.NON_UNIQUE,
         )
         self.connect("activate", self._activate)
         self.cfg = load_config()
