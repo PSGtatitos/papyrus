@@ -74,11 +74,11 @@ curl -fsSL "$REPO_RAW/papyrus.py" -o "$INSTALL_DIR/papyrus"
 chmod +x "$INSTALL_DIR/papyrus"
 
 # download icon
-curl -fsSL "$REPO_RAW/assets/icon.png" -o "$ICON_DIR/io.github.papyrus.png"
-ICON="io.github.papyrus"
+curl -fsSL "$REPO_RAW/assets/icon.png" -o "$ICON_DIR/io.github.PSGtatitos.papyrus.png"
+ICON="io.github.PSGtatitos.papyrus"
 
 # desktop entry
-cat > "$DESKTOP_DIR/io.github.papyrus.desktop" << DESKTOP
+cat > "$DESKTOP_DIR/io.github.PSGtatitos.papyrus.desktop" << DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Papyrus
