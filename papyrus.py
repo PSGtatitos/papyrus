@@ -265,7 +265,7 @@ def short_name(path: Path, n=22):
 class CWApp(Adw.Application):
     def __init__(self):
         super().__init__(
-            application_id="io.github.papyrus",
+            application_id="io.github.PSGtatitos.papyrus",
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
         self.connect("activate", self._activate)
