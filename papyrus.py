@@ -2,10 +2,6 @@
 """
 Papyrus — animated wallpaper picker for Pop!_OS COSMIC
 Uses mpvpaper under the hood. No metadata, no telemetry, no accounts.
-
-Requirements:
-    sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 ffmpeg
-    pip install pillow --break-system-packages
 """
 
 import gi
@@ -19,6 +15,10 @@ import shutil
 import threading
 import urllib.request
 from pathlib import Path
+import os
+
+# Force disable D-Bus service registration issues in Flatpak
+os.environ["GIO_USE_VFS"] = "local"
 
 # ── version ───────────────────────────────────────────────────────────────────
 VERSION      = "1.0.1"
@@ -55,7 +55,7 @@ AUTOSTART     = Path.home() / ".config" / "autostart" / "papyrus.desktop"
 DEFAULT_DIRS  = [Path.home() / "Wallpapers" / "Papyrus", Path.home() / "Downloads", Path.home() / "Videos", Path.home() / "Pictures"]
 VIDEO_EXTS    = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
 
-# COSMIC compiled theme paths (not Builder — the actual theme COSMIC reads)
+# COSMIC compiled theme paths
 COSMIC_DARK   = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark/v1"
 COSMIC_LIGHT  = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light/v1"
 COSMIC_DARK_B = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark.Builder/v1"
@@ -77,7 +77,7 @@ def save_config(cfg):
 
 # ── mpvpaper helpers ──────────────────────────────────────────────────────────
 def kill_mpvpaper():
-    subprocess.run(["pkill", "-f", "mpvpaper"], capture_output=True)
+    subprocess.run(["flatpak-spawn", "--host", "pkill", "-f", "mpvpaper"], capture_output=True)
 
 def detect_output():
     for cmd in [["wlr-randr"], ["wayland-info"]]:
@@ -94,8 +94,8 @@ def detect_output():
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     subprocess.Popen(
-        ["mpvpaper", "-o", "loop", output, path],
-        stdout=subprocess.DEVNULL,
+        ["flatpak-spawn", "--host", "mpvpaper", "-o", "loop", output, path],
+        stdout=subprocess.DEVNULL,  
         stderr=subprocess.DEVNULL,
     )
 
@@ -150,11 +150,9 @@ def lighten(r, g, b, amount):
     return min(1.0, r+amount), min(1.0, g+amount), min(1.0, b+amount)
 
 def c(r, g, b, a=1.0):
-    """Format a single color tuple as RON."""
     return f"(\n        red: {r:.7f},\n        green: {g:.7f},\n        blue: {b:.7f},\n        alpha: {a:.1f},\n    )"
 
 def write_accent(path: Path, r, g, b):
-    """Write the full compiled accent file COSMIC expects."""
     dr, dg, db = darken(r, g, b, 0.85)
     pr, pg, pb = darken(r, g, b, 0.55)
     path.write_text(f"""(
@@ -173,7 +171,6 @@ def write_accent(path: Path, r, g, b):
 )""")
 
 def write_background(path: Path, r, g, b, is_dark: bool):
-    """Write the full compiled background file COSMIC expects."""
     if is_dark:
         br, bg_, bb = darken(r, g, b, 0.15)
         br, bg_, bb = max(br, 0.08), max(bg_, 0.08), max(bb, 0.08)
@@ -204,7 +201,6 @@ def write_background(path: Path, r, g, b, is_dark: bool):
 )""")
 
 def write_builder_accent(path: Path, r, g, b):
-    """Also update the Builder accent so COSMIC Settings stays in sync."""
     path.write_text(f"Some((\n    red: {r:.7f},\n    green: {g:.7f},\n    blue: {b:.7f},\n))")
 
 def apply_cosmic_theme(thumb_path):
@@ -215,23 +211,19 @@ def apply_cosmic_theme(thumb_path):
     r, g, b = color
     print(f"[papyrus] accent: r={r:.3f} g={g:.3f} b={b:.3f} dark={is_dark}")
 
-    # write to compiled theme (what COSMIC actually reads)
     target = COSMIC_DARK if is_dark else COSMIC_LIGHT
     target.mkdir(parents=True, exist_ok=True)
     write_accent(target / "accent", r, g, b)
     write_background(target / "background", r, g, b, is_dark)
     (target / "is_dark").write_text("true" if is_dark else "false")
 
-    # also update builder so Settings UI reflects the change
     builder = COSMIC_DARK_B if is_dark else COSMIC_LIGHT_B
     builder.mkdir(parents=True, exist_ok=True)
     write_builder_accent(builder / "accent", r, g, b)
 
-    # set dark/light mode
     COSMIC_MODE.mkdir(parents=True, exist_ok=True)
     (COSMIC_MODE / "is_dark").write_text("true" if is_dark else "false")
     (COSMIC_MODE / "auto_switch").write_text("false")
-
 
     return True
 
@@ -268,6 +260,8 @@ class CWApp(Adw.Application):
             application_id="io.github.PSGtatitos.papyrus",
             flags=Gio.ApplicationFlags.NON_UNIQUE,
         )
+        self.set_inactivity_timeout(0)   # Helps with Flatpak D-Bus issues
+        
         self.connect("activate", self._activate)
         self.cfg = load_config()
         self.output = self.cfg.get("output") or detect_output()
@@ -277,6 +271,7 @@ class CWApp(Adw.Application):
         self.win.set_title("Papyrus")
         self.win.set_default_size(720, 540)
 
+        # ... (rest of your UI code remains exactly the same)
         hb = Adw.HeaderBar()
         title = Adw.WindowTitle(title="Papyrus", subtitle="animated wallpapers via mpvpaper")
         hb.set_title_widget(title)
@@ -341,6 +336,7 @@ class CWApp(Adw.Application):
         self.win.present()
         check_for_updates(self._on_update_available)
 
+    # ... (all your other methods remain unchanged)
     def _populate(self):
         while child := self.flow.get_first_child():
             self.flow.remove(child)
@@ -442,13 +438,11 @@ class CWApp(Adw.Application):
         try:
             folder = dialog.select_folder_finish(result)
             path = folder.get_path()
-            # replace all dirs with just this folder
             self.cfg["dirs"] = [path]
             save_config(self.cfg)
             self._populate()
         except Exception:
             pass
-
 
     def _on_update_available(self, latest: str):
         self.banner.set_title(f"Update available: v{latest} — click to download")
