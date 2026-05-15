@@ -25,6 +25,10 @@ It also automatically extracts the dominant color from your wallpaper and applie
 - 🔁 **Start on login** — one toggle to persist your wallpaper across reboots
 - 🚫 **No telemetry, no accounts, no cloud** — config is a plain JSON file
 
+## COSMIC Store
+Papyrus got succesfully merged into the cosmic-flatpak repositories so and the app can be installed directly by the COSMIC Store.
+You can also choose to install Papyrus manually by following the installation steps mentioned in the Installation section.
+
 ## Requirements
 
 - Pop!_OS 24.04 with COSMIC desktop
