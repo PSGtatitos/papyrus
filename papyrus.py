@@ -225,14 +225,29 @@ def apply_cosmic_theme(thumb_path):
 
     target = COSMIC_DARK if is_dark else COSMIC_LIGHT
     target.mkdir(parents=True, exist_ok=True)
+
     write_accent(target / "accent", r, g, b)
     write_background(target / "background", r, g, b, is_dark)
     (target / "is_dark").write_text("true" if is_dark else "false")
 
+    # Update Builder theme too
     builder = COSMIC_DARK_B if is_dark else COSMIC_LIGHT_B
     builder.mkdir(parents=True, exist_ok=True)
     write_builder_accent(builder / "accent", r, g, b)
 
+    # Update mode
+    COSMIC_MODE.mkdir(parents=True, exist_ok=True)
+    (COSMIC_MODE / "is_dark").write_text("true" if is_dark else "false")
+    (COSMIC_MODE / "auto_switch").write_text("false")
+
+    # Force COSMIC to reload the theme
+    try:
+        subprocess.run(["pkill", "-USR1", "cosmic-panel"], capture_output=True)
+        subprocess.run(["pkill", "-USR1", "cosmic-osd"], capture_output=True)
+    except Exception:
+        pass
+
+    print("[papyrus] Theme applied successfully")
     return True
 
 # ── video scanning ────────────────────────────────────────────────────────────
