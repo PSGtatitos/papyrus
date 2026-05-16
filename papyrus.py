@@ -2,10 +2,6 @@
 """
 Papyrus — animated wallpaper picker for Pop!_OS COSMIC
 Uses mpvpaper under the hood. No metadata, no telemetry, no accounts.
-
-Requirements:
-    sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 ffmpeg
-    pip install pillow --break-system-packages
 """
 
 import gi
@@ -21,13 +17,28 @@ import urllib.request
 from pathlib import Path
 import os
 
+# Flatpak compatibility - run commands on the host system
+os.environ["GIO_USE_VFS"] = "local"
+FLATPAK_SPAWN = shutil.which("flatpak-spawn")
+
+def host_run(cmd, **kwargs):
+    """Run command on host (works both inside and outside Flatpak)"""
+    if FLATPAK_SPAWN:
+        return subprocess.run([FLATPAK_SPAWN, "--host"] + cmd, **kwargs)
+    return subprocess.run(cmd, **kwargs)
+
+def host_popen(cmd, **kwargs):
+    """Popen on host"""
+    if FLATPAK_SPAWN:
+        return subprocess.Popen([FLATPAK_SPAWN, "--host"] + cmd, **kwargs)
+    return subprocess.Popen(cmd, **kwargs)
+
 # ── version ───────────────────────────────────────────────────────────────────
 VERSION      = "1.0.1"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 
 def check_for_updates(callback):
-    """Check GitHub for a newer release in a background thread."""
     from gi.repository import GLib
 
     def _check():
@@ -56,7 +67,7 @@ AUTOSTART     = Path.home() / ".config" / "autostart" / "papyrus.desktop"
 DEFAULT_DIRS  = [Path.home() / "Wallpapers" / "Papyrus", Path.home() / "Downloads", Path.home() / "Videos", Path.home() / "Pictures"]
 VIDEO_EXTS    = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
 
-# COSMIC compiled theme paths (not Builder — the actual theme COSMIC reads)
+# COSMIC compiled theme paths
 COSMIC_DARK   = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark/v1"
 COSMIC_LIGHT  = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light/v1"
 COSMIC_DARK_B = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark.Builder/v1"
@@ -78,12 +89,12 @@ def save_config(cfg):
 
 # ── mpvpaper helpers ──────────────────────────────────────────────────────────
 def kill_mpvpaper():
-    subprocess.run(["pkill", "-f", "mpvpaper"], capture_output=True)
+    host_run(["pkill", "-f", "mpvpaper"], capture_output=True)
 
 def detect_output():
     for cmd in [["wlr-randr"], ["wayland-info"]]:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            r = host_run(cmd, capture_output=True, text=True, timeout=2)
             for line in r.stdout.splitlines():
                 for token in line.split():
                     if any(token.startswith(p) for p in ("HDMI", "DP-", "eDP", "VGA")):
@@ -94,7 +105,7 @@ def detect_output():
 
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
-    subprocess.Popen(
+    host_popen(
         ["mpvpaper", "-o", "loop", output, path],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -106,7 +117,7 @@ def write_autostart(path: str, output: str):
         "[Desktop Entry]\n"
         "Type=Application\n"
         "Name=Papyrus\n"
-        f'Exec=mpvpaper -o "loop" {output} {path}\n'
+        f'Exec=flatpak run io.github.PSGtatitos.papyrus\n'
         "X-GNOME-Autostart-enabled=true\n"
     )
 
@@ -151,11 +162,9 @@ def lighten(r, g, b, amount):
     return min(1.0, r+amount), min(1.0, g+amount), min(1.0, b+amount)
 
 def c(r, g, b, a=1.0):
-    """Format a single color tuple as RON."""
     return f"(\n        red: {r:.7f},\n        green: {g:.7f},\n        blue: {b:.7f},\n        alpha: {a:.1f},\n    )"
 
 def write_accent(path: Path, r, g, b):
-    """Write the full compiled accent file COSMIC expects."""
     dr, dg, db = darken(r, g, b, 0.85)
     pr, pg, pb = darken(r, g, b, 0.55)
     path.write_text(f"""(
@@ -174,7 +183,6 @@ def write_accent(path: Path, r, g, b):
 )""")
 
 def write_background(path: Path, r, g, b, is_dark: bool):
-    """Write the full compiled background file COSMIC expects."""
     if is_dark:
         br, bg_, bb = darken(r, g, b, 0.15)
         br, bg_, bb = max(br, 0.08), max(bg_, 0.08), max(bb, 0.08)
@@ -205,7 +213,6 @@ def write_background(path: Path, r, g, b, is_dark: bool):
 )""")
 
 def write_builder_accent(path: Path, r, g, b):
-    """Also update the Builder accent so COSMIC Settings stays in sync."""
     path.write_text(f"Some((\n    red: {r:.7f},\n    green: {g:.7f},\n    blue: {b:.7f},\n))")
 
 def apply_cosmic_theme(thumb_path):
@@ -216,14 +223,12 @@ def apply_cosmic_theme(thumb_path):
     r, g, b = color
     print(f"[papyrus] accent: r={r:.3f} g={g:.3f} b={b:.3f} dark={is_dark}")
 
-    # write to compiled theme (what COSMIC actually reads)
     target = COSMIC_DARK if is_dark else COSMIC_LIGHT
     target.mkdir(parents=True, exist_ok=True)
     write_accent(target / "accent", r, g, b)
     write_background(target / "background", r, g, b, is_dark)
     (target / "is_dark").write_text("true" if is_dark else "false")
 
-    # write to Builder theme (so COSMIC Settings stays in sync)
     builder = COSMIC_DARK_B if is_dark else COSMIC_LIGHT_B
     builder.mkdir(parents=True, exist_ok=True)
     write_builder_accent(builder / "accent", r, g, b)
@@ -237,7 +242,7 @@ def scan_videos(dirs):
         p = Path(d)
         if p.exists():
             for f in sorted(p.iterdir()):
-                if f.suffix.lower() in VIDEO_EXTS:
+                if f.is_file() and f.suffix.lower() in VIDEO_EXTS:
                     videos.append(f)
     return videos
 
@@ -245,7 +250,7 @@ def get_thumb(path: Path) -> Path:
     thumb = CONFIG_DIR / "thumbs" / (path.stem[:80] + ".jpg")
     if not thumb.exists():
         thumb.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
+        host_run(
             ["ffmpeg", "-y", "-i", str(path), "-ss", "00:00:01",
              "-vframes", "1", "-vf", "scale=160:-1", str(thumb)],
             capture_output=True,
@@ -336,6 +341,7 @@ class CWApp(Adw.Application):
         self.win.present()
         check_for_updates(self._on_update_available)
 
+    # Keep all your other methods unchanged from here
     def _populate(self):
         while child := self.flow.get_first_child():
             self.flow.remove(child)
@@ -450,11 +456,10 @@ class CWApp(Adw.Application):
         self.banner.set_revealed(True)
 
     def _open_releases(self):
-        import subprocess
         subprocess.Popen(["xdg-open", RELEASES_URL])
 
 if __name__ == "__main__":
-    if not shutil.which("mpvpaper"):
+    if not shutil.which("mpvpaper") and not FLATPAK_SPAWN:
         print("mpvpaper not found. Install it first.")
         raise SystemExit(1)
     CWApp().run(None)
