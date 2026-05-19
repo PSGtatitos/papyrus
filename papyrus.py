@@ -94,8 +94,9 @@ def detect_output():
 
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
+    mpv = "/app/bin/mpvpaper" if Path("/app/bin/mpvpaper").exists() else "mpvpaper"
     subprocess.Popen(
-        ["mpvpaper", "-o", "loop", output, path],
+        [mpv, "-o", "loop", output, path],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -454,7 +455,7 @@ class CWApp(Adw.Application):
         subprocess.Popen(["xdg-open", RELEASES_URL])
 
 if __name__ == "__main__":
-    if not shutil.which("mpvpaper"):
+    if not shutil.which("mpvpaper") and not Path("/app/bin/mpvpaper").exists():
         print("mpvpaper not found. Install it first.")
         raise SystemExit(1)
     CWApp().run(None)
