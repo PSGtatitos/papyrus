@@ -86,15 +86,32 @@ def _mpvpaper_bin():
     return "mpvpaper"
     
 def detect_output():
+    # 1. Try native GTK/Gdk display server query (Perfect for Flatpak)
+    try:
+        from gi.repository import Gdk
+        display = Gdk.Display.get_default()
+        if display:
+            monitors = display.get_monitors()
+            if monitors.get_n_items() > 0:
+                monitor = monitors.get_item(0)
+                # get_connector() safely retrieves names like "eDP-1" or "HDMI-A-1"
+                if hasattr(monitor, "get_connector") and monitor.get_connector():
+                    return monitor.get_connector()
+    except Exception as e:
+        print(f"[papyrus] Native Gdk display detection failed: {e}")
+
+    # 2. Native host fallback fallback if Gdk method fails
     for cmd in [["wlr-randr"], ["wayland-info"]]:
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            if r.returncode != 0:
+                continue
             for line in r.stdout.splitlines():
-                for token in line.split():
-                    if any(token.startswith(p) for p in ("HDMI", "DP-", "eDP", "VGA")):
-                        return token.strip("\"'")
+                if cmd[0] == "wlr-randr" and "connected" in line:
+                    return line.split()[0]
         except Exception:
-            pass
+            continue
+
     return "*"
 
 
