@@ -80,6 +80,11 @@ def save_config(cfg):
 def kill_mpvpaper():
     subprocess.run(["pkill", "-f", "mpvpaper"], capture_output=True)
 
+def _mpvpaper_bin():
+    if Path("/app/bin/mpvpaper").exists():
+        return "/app/bin/mpvpaper"
+    return "mpvpaper"
+    
 def detect_output():
     for cmd in [["wlr-randr"], ["wayland-info"]]:
         try:
@@ -92,13 +97,13 @@ def detect_output():
             pass
     return "*"
 
+
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
-    mpv = "/app/bin/mpvpaper" if Path("/app/bin/mpvpaper").exists() else "mpvpaper"
     subprocess.Popen(
-        [mpv, "-o", "loop", output, path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        [_mpvpaper_bin(), "-o", "loop", output, path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
 def write_autostart(path: str, output: str):
