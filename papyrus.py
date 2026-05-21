@@ -117,11 +117,17 @@ def detect_output():
 
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [_mpvpaper_bin(), "-o", "loop", output, path],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    import threading
+    def log(stream):
+        for line in stream:
+            print("[mpvpaper]", line.decode().strip())
+    threading.Thread(target=log, args=(proc.stdout,), daemon=True).start()
+    threading.Thread(target=log, args=(proc.stderr,), daemon=True).start()
 
 def write_autostart(path: str, output: str):
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
