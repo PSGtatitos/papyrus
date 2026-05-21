@@ -122,6 +122,7 @@ def apply_wallpaper(path: str, output: str):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    print(f"[papyrus] mpvpaper PID: {proc.pid}")
     import threading
     def log(stream):
         for line in stream:
