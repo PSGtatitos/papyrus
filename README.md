@@ -10,6 +10,7 @@
 </div>
 
 ---
+<img width="710" height="534" alt="image" src="https://github.com/user-attachments/assets/0d915616-f572-451a-babd-c9d6cdca1279" />
 
 Papyrus is a free, open-source animated wallpaper manager for Pop!_OS COSMIC. Pick a video, click it, and it becomes your live wallpaper — no accounts, no telemetry, no Wallpaper Engine required.
 
