@@ -84,10 +84,10 @@ def kill_mpvpaper():
     _mpvpaper_pids.clear()
     subprocess.run(["pkill", "-f", "mpvpaper"], capture_output=True)
 
-def _mpvpaper_bin():
+def _mpvpaper_cmd(output, path):
     if Path("/app/bin/mpvpaper").exists():
-        return "/app/bin/mpvpaper"
-    return "mpvpaper"
+        return ["flatpak-spawn", "--host", "mpvpaper", "-o", "loop --no-audio", output, path]
+    return ["mpvpaper", "-o", "loop --no-audio", output, path]
 
 def detect_output():
     try:
@@ -126,15 +126,15 @@ def _wayland_display():
 
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
-    bin_path = _mpvpaper_bin()
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = CONFIG_DIR / "mpvpaper.log"
-    cmd = [bin_path, "-o", "loop --no-audio", output, path]
+    cmd = _mpvpaper_cmd(output, path)
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
         env = os.environ.copy()
-        env["WAYLAND_DISPLAY"] = _wayland_display()
+        if not IN_FLATPAK:
+            env["WAYLAND_DISPLAY"] = _wayland_display()
         proc = subprocess.Popen(
             cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
@@ -147,7 +147,7 @@ def apply_wallpaper(path: str, output: str):
 
     ts = datetime.now().isoformat()
     with log_file.open("a") as f:
-        f.write(f"[{ts}] WAYLAND_DISPLAY={env['WAYLAND_DISPLAY']}\n")
+        f.write(f"[{ts}] WAYLAND_DISPLAY={env.get('WAYLAND_DISPLAY', 'inherited')}\n")
         f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
 
     _mpvpaper_pids.add(proc.pid)
