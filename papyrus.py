@@ -115,56 +115,58 @@ def detect_output():
 
     return "*"
 
-def _mpvpaper_version():
-    try:
-        r = subprocess.run([_mpvpaper_bin(), "--version"], capture_output=True, text=True, timeout=5)
-        return f"version={r.stdout.strip() or r.stderr.strip()}"
-    except Exception as e:
-        return f"error: {e}"
-
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     bin_path = _mpvpaper_bin()
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = CONFIG_DIR / "mpvpaper.log"
-    cmd = [bin_path, output, path]
+    cmd = [bin_path, "-o", "loop --no-audio", output, path]
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
-    with log_file.open("a") as f:
-        f.write(f"[{ts}] mpvpaper --version: {_mpvpaper_version()}\n")
     try:
         proc = subprocess.Popen(
             cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
-        _mpvpaper_pids.add(proc.pid)
-        ts = datetime.now().isoformat()
-        with log_file.open("a") as f:
-            f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
-
-        def log_output():
-            with log_file.open("a") as f:
-                for line in iter(proc.stdout.readline, b""):
-                    f.write(f"[{datetime.now().isoformat()}] {line.decode()}")
-                    f.flush()
-        threading.Thread(target=log_output, daemon=True).start()
-
-        def monitor(timeout=5):
-            import time
-            time.sleep(timeout)
-            ret = proc.poll()
-            with log_file.open("a") as f:
-                if ret is not None:
-                    f.write(f"[{datetime.now().isoformat()}] mpvpaper exited with code {ret}\n")
-                else:
-                    f.write(f"[{datetime.now().isoformat()}] mpvpaper still running after {timeout}s\n")
-        threading.Thread(target=monitor, daemon=True).start()
-
-        return True
     except Exception as e:
+        msg = f"failed to start mpvpaper: {e}"
         ts = datetime.now().isoformat()
         with log_file.open("a") as f:
-            f.write(f"[{ts}] failed to start: {e}\n")
-        return False
+            f.write(f"[{ts}] {msg}\n")
+        return msg
+
+    import time
+    try:
+        ret = proc.wait(timeout=0.5)
+        out = proc.stdout.read().decode()
+        ts = datetime.now().isoformat()
+        with log_file.open("a") as f:
+            f.write(f"[{ts}] mpvpaper exited with code {ret}:\n{out}\n")
+        msg = f"mpvpaper failed (code {ret})"
+        if "Missing a required Wayland interface" in out:
+            msg = "Your compositor doesn't support wlr-layer-shell (needed by mpvpaper)"
+        return msg
+    except subprocess.TimeoutExpired:
+        pass
+
+    _mpvpaper_pids.add(proc.pid)
+    ts = datetime.now().isoformat()
+    with log_file.open("a") as f:
+        f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
+
+    def log_output():
+        with log_file.open("a") as f:
+            for line in iter(proc.stdout.readline, b""):
+                f.write(f"[{datetime.now().isoformat()}] {line.decode()}")
+                f.flush()
+    threading.Thread(target=log_output, daemon=True).start()
+
+    def monitor():
+        proc.wait()
+        with log_file.open("a") as f:
+            f.write(f"[{datetime.now().isoformat()}] mpvpaper exited with code {proc.returncode}\n")
+    threading.Thread(target=monitor, daemon=True).start()
+
+    return None
 
 def write_autostart(path: str, output: str):
     if IN_FLATPAK:
@@ -1458,9 +1460,9 @@ class CWApp(Adw.Application):
         pass
 
     def _apply(self, path: str):
-        ok = apply_wallpaper(path, self.output)
-        if not ok:
-            self.banner.set_title("Failed to start mpvpaper")
+        err = apply_wallpaper(path, self.output)
+        if err:
+            self.banner.set_title(err)
             return
         self.cfg["current"] = path
         self.cfg["output"] = self.output
