@@ -120,7 +120,7 @@ def apply_wallpaper(path: str, output: str):
     bin_path = _mpvpaper_bin()
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = CONFIG_DIR / "mpvpaper.log"
-    cmd = [bin_path, "-o", "loop --no-audio --vo=gpu-next --gpu-context=wayland --msg-level=all=v --log-file=" + str(CONFIG_DIR / "mpv.log"), output, path]
+    cmd = [bin_path, output, path]
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
