@@ -66,7 +66,7 @@ def load_config():
             return json.loads(CONFIG_FILE.read_text())
         except Exception:
             pass
-    return {"current": None, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*", "auto_theme": True}
+    return {"current": None, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*", "auto_theme": False}
 
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,24 +117,18 @@ def detect_output():
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     bin_path = _mpvpaper_bin()
-    cmd = [bin_path, "-o", "loop --no-audio", output, path]
-    print(f"[papyrus] running: {' '.join(cmd)}")
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    _mpvpaper_pids.add(proc.pid)
-    print(f"[papyrus] mpvpaper PID: {proc.pid}")
-    import threading
-    def log(stream):
-        for line in stream:
-            print("[mpvpaper]", line.decode().strip())
-    threading.Thread(target=log, args=(proc.stdout,), daemon=True).start()
-    threading.Thread(target=log, args=(proc.stderr,), daemon=True).start()
-    def check_exit():
-        proc.wait()
-        if proc.returncode != 0:
-            print(f"[papyrus] mpvpaper exited with code {proc.returncode}")
-    threading.Thread(target=check_exit, daemon=True).start()
+    cmd = [bin_path, "-o", "loop --no-config --no-audio", output, path]
+    print(f"[papyrus] running: {' '.join(cmd)}", flush=True)
+    try:
+        proc = subprocess.Popen(
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        _mpvpaper_pids.add(proc.pid)
+        print(f"[papyrus] mpvpaper PID: {proc.pid}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[papyrus] failed to start mpvpaper: {e}", flush=True)
+        return False
 
 def write_autostart(path: str, output: str):
     if IN_FLATPAK:
@@ -737,6 +731,7 @@ class CWApp(Adw.Application):
         self._current_page = "library"
 
     def _activate(self, app):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         self.win = Gtk.ApplicationWindow(application=app)
         self.win.set_default_size(960, 640)
 
@@ -1007,7 +1002,7 @@ class CWApp(Adw.Application):
         theme_text.append(theme_desc)
         theme_box.append(theme_text)
 
-        self.theme_sw = Gtk.Switch(active=self.cfg.get("auto_theme", True))
+        self.theme_sw = Gtk.Switch(active=self.cfg.get("auto_theme", False))
         self.theme_sw.set_valign(Gtk.Align.CENTER)
         self.theme_sw.connect("notify::active", self._on_theme_toggle)
         theme_box.append(self.theme_sw)
@@ -1427,13 +1422,16 @@ class CWApp(Adw.Application):
         pass
 
     def _apply(self, path: str):
-        apply_wallpaper(path, self.output)
+        ok = apply_wallpaper(path, self.output)
+        if not ok:
+            self.banner.set_title("Failed to start mpvpaper")
+            return
         self.cfg["current"] = path
         self.cfg["output"] = self.output
         save_config(self.cfg)
 
         thumb = get_thumb(Path(path))
-        if self.cfg.get("auto_theme", True) and thumb.exists():
+        if self.cfg.get("auto_theme", False) and thumb.exists():
             ok = apply_cosmic_theme(thumb, self.cfg.get("auto_dark", True))
             status = f"Active: {Path(path).name}" + (" · theme applied" if ok else " · theme failed")
         else:
