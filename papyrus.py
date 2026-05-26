@@ -17,6 +17,7 @@ import subprocess
 import json
 import shutil
 import threading
+import signal
 import urllib.request
 from pathlib import Path
 import os
@@ -24,6 +25,7 @@ import os
 VERSION      = "1.1.0"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
+IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
 
 def check_for_updates(callback):
     from gi.repository import GLib
@@ -70,7 +72,15 @@ def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
 
+_mpvpaper_pids = set()
+
 def kill_mpvpaper():
+    for pid in list(_mpvpaper_pids):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    _mpvpaper_pids.clear()
     subprocess.run(["pkill", "-f", "mpvpaper"], capture_output=True)
 
 def _mpvpaper_bin():
@@ -106,11 +116,13 @@ def detect_output():
 
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
+    bin_path = _mpvpaper_bin()
+    cmd = [bin_path, "-o", "loop", output, path]
+    print(f"[papyrus] running: {' '.join(cmd)}")
     proc = subprocess.Popen(
-        [_mpvpaper_bin(), "-o", "loop", output, path],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
+    _mpvpaper_pids.add(proc.pid)
     print(f"[papyrus] mpvpaper PID: {proc.pid}")
     import threading
     def log(stream):
@@ -118,8 +130,15 @@ def apply_wallpaper(path: str, output: str):
             print("[mpvpaper]", line.decode().strip())
     threading.Thread(target=log, args=(proc.stdout,), daemon=True).start()
     threading.Thread(target=log, args=(proc.stderr,), daemon=True).start()
+    def check_exit():
+        proc.wait()
+        if proc.returncode != 0:
+            print(f"[papyrus] mpvpaper exited with code {proc.returncode}")
+    threading.Thread(target=check_exit, daemon=True).start()
 
 def write_autostart(path: str, output: str):
+    if IN_FLATPAK:
+        return
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
     AUTOSTART.write_text(
         "[Desktop Entry]\n"
@@ -130,6 +149,8 @@ def write_autostart(path: str, output: str):
     )
 
 def remove_autostart():
+    if IN_FLATPAK:
+        return
     if AUTOSTART.exists():
         AUTOSTART.unlink()
 
@@ -1222,10 +1243,11 @@ class CWApp(Adw.Application):
     def _update_header_for_page(self, page, detail_name=None):
         if page == "library":
             self.header_title.set_title("Library")
-            self.header_title.set_subtitle("")
             self.add_btn.set_visible(True)
             self.stop_btn.set_visible(True)
             self.back_btn.set_visible(False)
+            videos = scan_videos(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
+            self.header_title.set_subtitle(f"{len(videos)} items found")
         elif page == "settings":
             self.header_title.set_title("Settings")
             self.header_title.set_subtitle("")
@@ -1484,8 +1506,7 @@ class CWApp(Adw.Application):
         self.banner.set_revealed(True)
 
     def _open_releases(self):
-        import subprocess
-        subprocess.Popen(["xdg-open", RELEASES_URL])
+        Gio.AppInfo.launch_default_for_uri(RELEASES_URL)
 
 if __name__ == "__main__":
     if not shutil.which("mpvpaper") and not Path("/app/bin/mpvpaper").exists():
