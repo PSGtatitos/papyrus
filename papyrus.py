@@ -115,6 +115,13 @@ def detect_output():
 
     return "*"
 
+def _mpvpaper_version():
+    try:
+        r = subprocess.run([_mpvpaper_bin(), "--version"], capture_output=True, text=True, timeout=5)
+        return f"version={r.stdout.strip() or r.stderr.strip()}"
+    except Exception as e:
+        return f"error: {e}"
+
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     bin_path = _mpvpaper_bin()
@@ -123,21 +130,23 @@ def apply_wallpaper(path: str, output: str):
     cmd = [bin_path, output, path]
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
+    with log_file.open("a") as f:
+        f.write(f"[{ts}] mpvpaper --version: {_mpvpaper_version()}\n")
     try:
         proc = subprocess.Popen(
-            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         _mpvpaper_pids.add(proc.pid)
         ts = datetime.now().isoformat()
         with log_file.open("a") as f:
             f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
 
-        def log_stderr():
+        def log_output():
             with log_file.open("a") as f:
-                for line in iter(proc.stderr.readline, b""):
+                for line in iter(proc.stdout.readline, b""):
                     f.write(f"[{datetime.now().isoformat()}] {line.decode()}")
                     f.flush()
-        threading.Thread(target=log_stderr, daemon=True).start()
+        threading.Thread(target=log_output, daemon=True).start()
 
         def monitor(timeout=5):
             import time
