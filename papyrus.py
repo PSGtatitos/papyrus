@@ -115,6 +115,15 @@ def detect_output():
 
     return "*"
 
+def _wayland_display():
+    try:
+        display = Gdk.Display.get_default()
+        if display:
+            return display.get_name() or "wayland-0"
+    except Exception:
+        pass
+    return os.environ.get("WAYLAND_DISPLAY", "wayland-0")
+
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     bin_path = _mpvpaper_bin()
@@ -124,34 +133,24 @@ def apply_wallpaper(path: str, output: str):
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
+        env = os.environ.copy()
+        env["WAYLAND_DISPLAY"] = _wayland_display()
         proc = subprocess.Popen(
-            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
     except Exception as e:
         msg = f"failed to start mpvpaper: {e}"
         ts = datetime.now().isoformat()
         with log_file.open("a") as f:
             f.write(f"[{ts}] {msg}\n")
-        return msg
+        return None, msg
 
-    import time
-    try:
-        ret = proc.wait(timeout=0.5)
-        out = proc.stdout.read().decode()
-        ts = datetime.now().isoformat()
-        with log_file.open("a") as f:
-            f.write(f"[{ts}] mpvpaper exited with code {ret}:\n{out}\n")
-        msg = f"mpvpaper failed (code {ret})"
-        if "Missing a required Wayland interface" in out:
-            msg = "Your compositor doesn't support wlr-layer-shell (needed by mpvpaper)"
-        return msg
-    except subprocess.TimeoutExpired:
-        pass
-
-    _mpvpaper_pids.add(proc.pid)
     ts = datetime.now().isoformat()
     with log_file.open("a") as f:
+        f.write(f"[{ts}] WAYLAND_DISPLAY={env['WAYLAND_DISPLAY']}\n")
         f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
+
+    _mpvpaper_pids.add(proc.pid)
 
     def log_output():
         with log_file.open("a") as f:
@@ -160,13 +159,7 @@ def apply_wallpaper(path: str, output: str):
                 f.flush()
     threading.Thread(target=log_output, daemon=True).start()
 
-    def monitor():
-        proc.wait()
-        with log_file.open("a") as f:
-            f.write(f"[{datetime.now().isoformat()}] mpvpaper exited with code {proc.returncode}\n")
-    threading.Thread(target=monitor, daemon=True).start()
-
-    return None
+    return proc, None
 
 def write_autostart(path: str, output: str):
     if IN_FLATPAK:
@@ -1460,7 +1453,7 @@ class CWApp(Adw.Application):
         pass
 
     def _apply(self, path: str):
-        err = apply_wallpaper(path, self.output)
+        proc, err = apply_wallpaper(path, self.output)
         if err:
             self.banner.set_title(err)
             return
@@ -1478,6 +1471,15 @@ class CWApp(Adw.Application):
         self.banner.set_title(status)
         if self.autostart_sw.get_active():
             write_autostart(path, self.output)
+
+        def monitor():
+            import time
+            time.sleep(3)
+            if proc.poll() is not None and proc.returncode != 0:
+                GLib.idle_add(lambda: self.banner.set_title(
+                    f"mpvpaper crashed (code {proc.returncode})"))
+        threading.Thread(target=monitor, daemon=True).start()
+
         self._populate()
         self._show_page("library")
 
