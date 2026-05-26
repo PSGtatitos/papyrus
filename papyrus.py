@@ -117,7 +117,7 @@ def detect_output():
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     bin_path = _mpvpaper_bin()
-    cmd = [bin_path, "-o", "loop", output, path]
+    cmd = [bin_path, "-o", "loop --no-audio", output, path]
     print(f"[papyrus] running: {' '.join(cmd)}")
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -195,7 +195,7 @@ def c(r, g, b, a=1.0):
 def write_accent(path: Path, r, g, b):
     dr, dg, db = darken(r, g, b, 0.85)
     pr, pg, pb = darken(r, g, b, 0.55)
-    path.write_text(f"""(
+    path.write_text(f"""Some((
     base: {c(r, g, b)},
     hover: {c(dr, dg, db)},
     pressed: {c(pr, pg, pb)},
@@ -208,7 +208,7 @@ def write_accent(path: Path, r, g, b):
     on_disabled: {c(pr, pg, pb)},
     border: {c(r, g, b)},
     disabled_border: {c(r, g, b, 0.5)},
-)""")
+))""")
 
 def write_background(path: Path, r, g, b, is_dark: bool):
     if is_dark:
@@ -243,7 +243,7 @@ def write_background(path: Path, r, g, b, is_dark: bool):
 def write_builder_accent(path: Path, r, g, b):
     path.write_text(f"Some((\n    red: {r:.7f},\n    green: {g:.7f},\n    blue: {b:.7f},\n))")
 
-def apply_cosmic_theme(thumb_path):
+def apply_cosmic_theme(thumb_path, auto_dark=True):
     color, is_dark = extract_palette(thumb_path)
     if color is None:
         return False
@@ -251,15 +251,18 @@ def apply_cosmic_theme(thumb_path):
     r, g, b = color
     print(f"[papyrus] accent: r={r:.3f} g={g:.3f} b={b:.3f} dark={is_dark}")
 
-    target = COSMIC_DARK if is_dark else COSMIC_LIGHT
-    target.mkdir(parents=True, exist_ok=True)
-    write_accent(target / "accent", r, g, b)
-    write_background(target / "background", r, g, b, is_dark)
-    (target / "is_dark").write_text("true" if is_dark else "false")
+    for variant, builder_var in [(COSMIC_DARK, COSMIC_DARK_B), (COSMIC_LIGHT, COSMIC_LIGHT_B)]:
+        variant.mkdir(parents=True, exist_ok=True)
+        write_accent(variant / "accent", r, g, b)
+        write_background(variant / "background", r, g, b, variant is COSMIC_DARK)
+        (variant / "is_dark").write_text("true" if variant is COSMIC_DARK else "false")
 
-    builder = COSMIC_DARK_B if is_dark else COSMIC_LIGHT_B
-    builder.mkdir(parents=True, exist_ok=True)
-    write_builder_accent(builder / "accent", r, g, b)
+        builder_var.mkdir(parents=True, exist_ok=True)
+        write_builder_accent(builder_var / "accent", r, g, b)
+
+    if auto_dark:
+        COSMIC_MODE.mkdir(parents=True, exist_ok=True)
+        (COSMIC_MODE / "is_dark").write_text("true" if is_dark else "false")
 
     return True
 
@@ -1431,7 +1434,7 @@ class CWApp(Adw.Application):
 
         thumb = get_thumb(Path(path))
         if self.cfg.get("auto_theme", True) and thumb.exists():
-            ok = apply_cosmic_theme(thumb)
+            ok = apply_cosmic_theme(thumb, self.cfg.get("auto_dark", True))
             status = f"Active: {Path(path).name}" + (" · theme applied" if ok else " · theme failed")
         else:
             status = f"Active: {Path(path).name}"
