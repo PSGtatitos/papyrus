@@ -115,15 +115,6 @@ def detect_output():
 
     return "*"
 
-def _wayland_display():
-    try:
-        display = Gdk.Display.get_default()
-        if display:
-            return display.get_name() or "wayland-0"
-    except Exception:
-        pass
-    return os.environ.get("WAYLAND_DISPLAY", "wayland-0")
-
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -132,11 +123,8 @@ def apply_wallpaper(path: str, output: str):
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
-        env = os.environ.copy()
-        if not IN_FLATPAK:
-            env["WAYLAND_DISPLAY"] = _wayland_display()
         proc = subprocess.Popen(
-            cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception as e:
         msg = f"failed to start mpvpaper: {e}"
@@ -145,19 +133,10 @@ def apply_wallpaper(path: str, output: str):
             f.write(f"[{ts}] {msg}\n")
         return None, msg
 
+    _mpvpaper_pids.add(proc.pid)
     ts = datetime.now().isoformat()
     with log_file.open("a") as f:
-        f.write(f"[{ts}] WAYLAND_DISPLAY={env.get('WAYLAND_DISPLAY', 'inherited')}\n")
         f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
-
-    _mpvpaper_pids.add(proc.pid)
-
-    def log_output():
-        with log_file.open("a") as f:
-            for line in iter(proc.stdout.readline, b""):
-                f.write(f"[{datetime.now().isoformat()}] {line.decode()}")
-                f.flush()
-    threading.Thread(target=log_output, daemon=True).start()
 
     return proc, None
 
