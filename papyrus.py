@@ -19,6 +19,7 @@ import shutil
 import threading
 import signal
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 import os
 
@@ -117,17 +118,30 @@ def detect_output():
 def apply_wallpaper(path: str, output: str):
     kill_mpvpaper()
     bin_path = _mpvpaper_bin()
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = CONFIG_DIR / "mpvpaper.log"
     cmd = [bin_path, "-o", "loop --no-config --no-audio", output, path]
-    print(f"[papyrus] running: {' '.join(cmd)}", flush=True)
+    ts = datetime.now().isoformat()
+    log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
         proc = subprocess.Popen(
-            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
         _mpvpaper_pids.add(proc.pid)
-        print(f"[papyrus] mpvpaper PID: {proc.pid}", flush=True)
+        ts = datetime.now().isoformat()
+        with log_file.open("a") as f:
+            f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
+        def log_stderr():
+            with log_file.open("a") as f:
+                for line in proc.stderr:
+                    f.write(f"[{datetime.now().isoformat()}] {line.decode()}")
+                    f.flush()
+        threading.Thread(target=log_stderr, daemon=True).start()
         return True
     except Exception as e:
-        print(f"[papyrus] failed to start mpvpaper: {e}", flush=True)
+        ts = datetime.now().isoformat()
+        with log_file.open("a") as f:
+            f.write(f"[{ts}] failed to start: {e}\n")
         return False
 
 def write_autostart(path: str, output: str):
