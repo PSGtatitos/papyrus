@@ -120,7 +120,7 @@ def apply_wallpaper(path: str, output: str):
     bin_path = _mpvpaper_bin()
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = CONFIG_DIR / "mpvpaper.log"
-    cmd = [bin_path, "-o", "loop --no-config --no-audio", output, path]
+    cmd = [bin_path, "-o", "loop --no-audio --vo=gpu-next --gpu-context=wayland --msg-level=all=v --log-file=" + str(CONFIG_DIR / "mpv.log"), output, path]
     ts = datetime.now().isoformat()
     log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
@@ -131,12 +131,25 @@ def apply_wallpaper(path: str, output: str):
         ts = datetime.now().isoformat()
         with log_file.open("a") as f:
             f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
+
         def log_stderr():
             with log_file.open("a") as f:
-                for line in proc.stderr:
+                for line in iter(proc.stderr.readline, b""):
                     f.write(f"[{datetime.now().isoformat()}] {line.decode()}")
                     f.flush()
         threading.Thread(target=log_stderr, daemon=True).start()
+
+        def monitor(timeout=5):
+            import time
+            time.sleep(timeout)
+            ret = proc.poll()
+            with log_file.open("a") as f:
+                if ret is not None:
+                    f.write(f"[{datetime.now().isoformat()}] mpvpaper exited with code {ret}\n")
+                else:
+                    f.write(f"[{datetime.now().isoformat()}] mpvpaper still running after {timeout}s\n")
+        threading.Thread(target=monitor, daemon=True).start()
+
         return True
     except Exception as e:
         ts = datetime.now().isoformat()
