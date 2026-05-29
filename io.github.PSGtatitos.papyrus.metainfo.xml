@@ -26,7 +26,8 @@
   <url type="bugtracker">https://github.com/PSGtatitos/papyrus/issues</url>
 
   <launchable type="desktop-id">io.github.PSGtatitos.papyrus.desktop</launchable>
-
+  <icon type="remote">https://raw.githubusercontent.com/PSGtatitos/papyrus/main/assets/icon.png</icon>
+  
   <releases>
     <release version="1.0.0" date="2026-05-03">
       <description>
@@ -35,8 +36,4 @@
     </release>
   </releases>
 
-  <content_rating type="oars-1.1"/>
-  <provides>
-    <id>com.system76.CosmicApplication</id>
-  </provides>
 </component>
