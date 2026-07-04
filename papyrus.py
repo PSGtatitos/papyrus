@@ -18,6 +18,7 @@ import json
 import shutil
 import threading
 import signal
+import random
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -67,7 +68,8 @@ def load_config():
             return json.loads(CONFIG_FILE.read_text())
         except Exception:
             pass
-    return {"current": None, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*", "auto_theme": False}
+    return {"current": None, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*", "auto_theme": False,
+            "rotation": False, "interval": 30, "order": "random", "seq_index": 0}
 
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -739,6 +741,7 @@ class CWApp(Adw.Application):
         self.cfg = load_config()
         self.output = self.cfg.get("output") or detect_output()
         self._current_page = "library"
+        self._rotation_source = None
 
     def _activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
@@ -808,6 +811,9 @@ class CWApp(Adw.Application):
         current = self.cfg.get("current")
         if current:
             self.header_title.set_subtitle(f"Active: {Path(current).name}")
+
+        if self.cfg.get("rotation", False):
+            self._start_rotation()
 
         self.win.present()
         check_for_updates(self._on_update_available)
@@ -1039,6 +1045,82 @@ class CWApp(Adw.Application):
 
         int_box.append(dark_box)
         page.append(int_box)
+
+        page.append(Gtk.Label(label="", margin_top=32))
+
+        # Playlist section
+        pl_title = Gtk.Label(label="Playlist")
+        pl_title.add_css_class("settings-section-title")
+        pl_title.set_halign(Gtk.Align.START)
+        page.append(pl_title)
+
+        pl_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        pl_box.add_css_class("settings-group-container")
+
+        # Rotation toggle row
+        rot_box = Gtk.Box(spacing=16)
+        rot_box.add_css_class("settings-row")
+        rot_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        rot_lbl = Gtk.Label(label="Auto-rotate", xalign=0)
+        rot_lbl.add_css_class("control-label")
+        rot_desc = Gtk.Label(label="Automatically switch to a random or sequential wallpaper at a set interval.", xalign=0, wrap=True)
+        rot_desc.add_css_class("status-label")
+        rot_desc.add_css_class("settings-desc")
+        rot_text.append(rot_lbl)
+        rot_text.append(rot_desc)
+        rot_box.append(rot_text)
+
+        self.rotation_sw = Gtk.Switch(active=self.cfg.get("rotation", False))
+        self.rotation_sw.set_valign(Gtk.Align.CENTER)
+        self.rotation_sw.connect("notify::active", self._on_rotation_toggle)
+        rot_box.append(self.rotation_sw)
+
+        pl_box.append(rot_box)
+
+        # Interval row
+        intv_box = Gtk.Box(spacing=16)
+        intv_box.add_css_class("settings-row")
+        intv_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        intv_lbl = Gtk.Label(label="Rotation Interval", xalign=0)
+        intv_lbl.add_css_class("control-label")
+        intv_desc = Gtk.Label(label="Minutes between wallpaper changes.", xalign=0, wrap=True)
+        intv_desc.add_css_class("status-label")
+        intv_desc.add_css_class("settings-desc")
+        intv_text.append(intv_lbl)
+        intv_text.append(intv_desc)
+        intv_box.append(intv_text)
+
+        adj = Gtk.Adjustment(value=self.cfg.get("interval", 30), lower=1, upper=999, step_increment=1)
+        self.interval_spin = Gtk.SpinButton(adjustment=adj)
+        self.interval_spin.set_valign(Gtk.Align.CENTER)
+        self.interval_spin.connect("notify::value", self._on_interval_changed)
+        intv_box.append(self.interval_spin)
+
+        pl_box.append(intv_box)
+
+        # Order row
+        ord_box = Gtk.Box(spacing=16)
+        ord_box.add_css_class("settings-row")
+        ord_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        ord_lbl = Gtk.Label(label="Order", xalign=0)
+        ord_lbl.add_css_class("control-label")
+        ord_desc = Gtk.Label(label="Random picks a wallpaper at random; Sequential goes through the list in order.", xalign=0, wrap=True)
+        ord_desc.add_css_class("status-label")
+        ord_desc.add_css_class("settings-desc")
+        ord_text.append(ord_lbl)
+        ord_text.append(ord_desc)
+        ord_box.append(ord_text)
+
+        order_options = ["Random", "Sequential"]
+        self.order_dropdown = Gtk.DropDown.new_from_strings(order_options)
+        idx = 0 if self.cfg.get("order", "random") == "random" else 1
+        self.order_dropdown.set_selected(idx)
+        self.order_dropdown.set_valign(Gtk.Align.CENTER)
+        self.order_dropdown.connect("notify::selected", self._on_order_changed)
+        ord_box.append(self.order_dropdown)
+
+        pl_box.append(ord_box)
+        page.append(pl_box)
 
         # Folder management section
         page.append(Gtk.Label(label="", margin_top=32))
@@ -1462,7 +1544,11 @@ class CWApp(Adw.Application):
         self._populate()
         self._show_page("library")
 
+        if self.cfg.get("rotation", False):
+            self._start_rotation()
+
     def _stop(self, _btn):
+        self._stop_rotation()
         kill_mpvpaper()
         self.cfg["current"] = None
         save_config(self.cfg)
@@ -1500,6 +1586,57 @@ class CWApp(Adw.Application):
         self.cfg["output"] = self.output
         save_config(self.cfg)
         self.monitor_lbl.set_label(f"Output: {self.output}")
+
+    def _collect_videos(self):
+        dirs = self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS])
+        return sorted(scan_videos(dirs), key=lambda p: str(p))
+
+    def _rotate_wallpaper(self):
+        videos = self._collect_videos()
+        if not videos:
+            return True
+        order = self.cfg.get("order", "random")
+        idx = self.cfg.get("seq_index", 0)
+        if order == "random":
+            pick = random.choice(videos)
+        else:
+            pick = videos[idx % len(videos)]
+            self.cfg["seq_index"] = (idx + 1) % len(videos)
+            save_config(self.cfg)
+        if pick:
+            self._apply(str(pick))
+        return True
+
+    def _start_rotation(self):
+        self._stop_rotation()
+        interval = max(self.cfg.get("interval", 30), 1) * 60000
+        self._rotation_source = GLib.timeout_add(interval, self._rotate_wallpaper)
+
+    def _stop_rotation(self):
+        if self._rotation_source is not None:
+            GLib.source_remove(self._rotation_source)
+            self._rotation_source = None
+
+    def _on_rotation_toggle(self, sw, _param):
+        active = sw.get_active()
+        self.cfg["rotation"] = active
+        save_config(self.cfg)
+        if active:
+            self._start_rotation()
+        else:
+            self._stop_rotation()
+
+    def _on_interval_changed(self, spin, _param):
+        self.cfg["interval"] = int(spin.get_value())
+        save_config(self.cfg)
+        if self.cfg.get("rotation", False):
+            self._start_rotation()
+
+    def _on_order_changed(self, dd, _param):
+        idx = dd.get_selected()
+        self.cfg["order"] = "random" if idx == 0 else "sequential"
+        self.cfg["seq_index"] = 0
+        save_config(self.cfg)
 
     def _add_folder(self, _btn):
         dialog = Gtk.FileDialog(title="Choose wallpaper folder")
