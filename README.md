@@ -25,6 +25,7 @@ It also automatically extracts the dominant color from your wallpaper and applie
 - 📁 **Folder picker** — choose any folder of video files to scan
 - 🖼️ **Thumbnail previews** — auto-generated from your video files
 - 🔁 **Start on login** — one toggle to persist your wallpaper across reboots
+- ⏩ **Sequential/Random Wallpaper Changing** — change your wallpaper in random or sequuential order with a set interval in settings
 - 🚫 **No telemetry, no accounts, no cloud** — config is a plain JSON file
 
 ## COSMIC Store
