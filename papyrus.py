@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.1.0"
+VERSION      = "1.2.0"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -1514,8 +1514,10 @@ class CWApp(Adw.Application):
         pass
 
     def _apply(self, path: str):
+        print(f"[papyrus] _apply called with {path}")
         proc, err = apply_wallpaper(path, self.output)
         if err:
+            print(f"[papyrus] _apply error: {err}")
             self.banner.set_title(err)
             return
         self.cfg["current"] = path
@@ -1592,33 +1594,39 @@ class CWApp(Adw.Application):
         return sorted(scan_videos(dirs), key=lambda p: str(p))
 
     def _rotate_wallpaper(self):
+        print(f"[papyrus] rotate tick")
         videos = self._collect_videos()
         if not videos:
+            print("[papyrus] rotate: no videos found")
             return True
         order = self.cfg.get("order", "random")
         idx = self.cfg.get("seq_index", 0)
         if order == "random":
             pick = random.choice(videos)
+            print(f"[papyrus] rotate random: picked {pick.name}")
         else:
             pick = videos[idx % len(videos)]
+            print(f"[papyrus] rotate sequential ({idx}): picked {pick.name}")
             self.cfg["seq_index"] = (idx + 1) % len(videos)
             save_config(self.cfg)
-        if pick:
-            self._apply(str(pick))
+        self._apply(str(pick))
         return True
 
     def _start_rotation(self):
         self._stop_rotation()
         interval = max(self.cfg.get("interval", 30), 1) * 60000
+        print(f"[papyrus] rotation started: interval={interval}ms ({interval//60000}min)")
         self._rotation_source = GLib.timeout_add(interval, self._rotate_wallpaper)
 
     def _stop_rotation(self):
         if self._rotation_source is not None:
+            print(f"[papyrus] rotation stopped (source={self._rotation_source})")
             GLib.source_remove(self._rotation_source)
             self._rotation_source = None
 
     def _on_rotation_toggle(self, sw, _param):
         active = sw.get_active()
+        print(f"[papyrus] rotation toggle: {'ON' if active else 'OFF'}")
         self.cfg["rotation"] = active
         save_config(self.cfg)
         if active:
