@@ -16,24 +16,50 @@
       <li>Animated wallpapers from MP4, WebM, MKV, AVI and MOV files</li>
       <li>Auto-theme — extracts the dominant color and applies it as your COSMIC accent</li>
       <li>Auto dark/light mode based on wallpaper brightness</li>
+      <li>Playlist rotation with configurable interval and random/sequential order</li>
       <li>Thumbnail previews auto-generated from your video files</li>
       <li>Start on login toggle</li>
       <li>No telemetry, no accounts, no cloud</li>
     </ul>
   </description>
 
+  <developer_name>PSGtatitos</developer_name>
+
   <url type="homepage">https://github.com/PSGtatitos/papyrus</url>
   <url type="bugtracker">https://github.com/PSGtatitos/papyrus/issues</url>
+  <url type="donation">https://github.com/sponsors/PSGtatitos</url>
 
   <launchable type="desktop-id">io.github.PSGtatitos.papyrus.desktop</launchable>
-  <icon type="remote">https://raw.githubusercontent.com/PSGtatitos/papyrus/main/assets/icon.png</icon>
-  
+
   <releases>
+    <release version="1.2.0" date="2026-07-08">
+      <description>
+        <p>Playlist rotation, improved Flatpak support, bug fixes.</p>
+        <ul>
+          <li>Auto-rotate wallpapers at a configurable interval (random or sequential order)</li>
+          <li>Flatpak build system with full COSMIC theme integration</li>
+          <li>Various stability improvements</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.1.0" date="2026-06-01">
+      <description>
+        <p>UI redesign, COSMIC theme integration, Dark/Light auto mode.</p>
+        <ul>
+          <li>Sidebar navigation (Library/Settings/Help)</li>
+          <li>Auto-theme: sync COSMIC accent with wallpaper dominant color</li>
+          <li>Auto dark/light mode based on wallpaper brightness</li>
+          <li>Flatpak sandbox support with host mpvpaper</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-05-03">
       <description>
         <p>Initial release of Papyrus.</p>
       </description>
     </release>
   </releases>
+
+  <content_rating type="oars-1.1" />
 
 </component>
