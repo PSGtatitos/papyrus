@@ -69,7 +69,7 @@ jobs:
           cp io.github.PSGtatitos.papyrus.metainfo.xml \
             $PKG_ROOT/usr/share/metainfo/
           cp assets/icon.png \
-            $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/
+            $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/io.github.PSGtatitos.papyrus.png
 
           dpkg-deb --build $PKG_ROOT /tmp/papyrus_${VERSION}_amd64.deb
 
