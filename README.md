@@ -7,6 +7,7 @@
   ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
   ![DE](https://img.shields.io/badge/DE-COSMIC-orange)
   ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 </div>
 
 ---
