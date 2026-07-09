@@ -3,11 +3,12 @@ name: Build .deb
 on:
   push:
     tags: [ "v*" ]
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout papyrus
@@ -21,10 +22,6 @@ jobs:
             ffmpeg python3-pip python3-pil \
             libmpv-dev libwayland-dev wayland-protocols \
             meson ninja-build pkg-config
-
-      - name: Install Python dependencies
-        run: |
-          pip3 install pillow --break-system-packages
 
       - name: Build mpvpaper from source
         run: |
@@ -76,7 +73,14 @@ jobs:
 
           dpkg-deb --build $PKG_ROOT /tmp/papyrus_${VERSION}_amd64.deb
 
+      - name: Upload .deb as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: papyrus-deb
+          path: /tmp/papyrus_*.deb
+
       - name: Create Release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: /tmp/papyrus_*.deb
