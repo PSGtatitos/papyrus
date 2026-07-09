@@ -1,0 +1,95 @@
+name: Build .deb
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout papyrus
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+            ffmpeg python3-pip python3-pil \
+            libmpv-dev libwayland-dev wayland-protocols \
+            meson ninja-build pkg-config
+
+      - name: Install Python dependencies
+        run: |
+          pip3 install pillow --break-system-packages
+
+      - name: Build mpvpaper from source
+        run: |
+          git clone --depth 1 --branch 1.5 \
+            https://github.com/GhostNaN/mpvpaper.git /tmp/mpvpaper
+          cd /tmp/mpvpaper
+          CFLAGS="-Wno-error=incompatible-pointer-types" meson setup build
+          ninja -C build
+
+      - name: Package .deb
+        run: |
+          PKG_ROOT=/tmp/papyrus-deb
+          mkdir -p $PKG_ROOT/DEBIAN
+          mkdir -p $PKG_ROOT/usr/bin
+          mkdir -p $PKG_ROOT/usr/share/applications
+          mkdir -p $PKG_ROOT/usr/share/metainfo
+          mkdir -p $PKG_ROOT/usr/share/icons/hicolor/256x256/apps
+
+          case "${GITHUB_REF_NAME}" in
+            v*) VERSION="${GITHUB_REF_NAME#v}" ;;
+            *)  VERSION="1.2.0" ;;
+          esac
+
+          printf '%s\n' \
+            "Package: papyrus" \
+            "Version: $VERSION" \
+            "Architecture: amd64" \
+            "Maintainer: PSGtatitos <psgtatitos@github>" \
+            "Section: utils" \
+            "Priority: optional" \
+            "Homepage: https://github.com/PSGtatitos/papyrus" \
+            "Description: Animated wallpaper manager for COSMIC" \
+            " Papyrus turns video files into live desktop wallpapers" \
+            " using mpvpaper. Supports MP4, WebM, MKV, AVI, MOV." \
+            " Integrates with COSMIC desktop environment for" \
+            " auto-theming (accent color sync) and playlist rotation." \
+            "Depends: python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, ffmpeg, python3-pil, libmpv2" \
+            > $PKG_ROOT/DEBIAN/control
+
+          cp /tmp/mpvpaper/build/mpvpaper $PKG_ROOT/usr/bin/
+          cp /tmp/mpvpaper/build/mpvpaper-holder $PKG_ROOT/usr/bin/
+
+          cp papyrus.py $PKG_ROOT/usr/bin/papyrus
+          chmod 755 $PKG_ROOT/usr/bin/papyrus
+
+          cp io.github.PSGtatitos.papyrus.desktop \
+            $PKG_ROOT/usr/share/applications/
+          cp io.github.PSGtatitos.papyrus.metainfo.xml \
+            $PKG_ROOT/usr/share/metainfo/
+          cp assets/icon.png \
+            $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/
+
+          dpkg-deb --build $PKG_ROOT /tmp/papyrus_${VERSION}_amd64.deb
+
+      - name: Upload .deb as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: papyrus-deb
+          path: /tmp/papyrus_*.deb
+
+      - name: Create Release (on tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/papyrus_*.deb
+          generate_release_notes: true
