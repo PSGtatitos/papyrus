@@ -740,6 +740,8 @@ class CWApp(Adw.Application):
         self.connect("activate", self._activate)
         self.cfg = load_config()
         self.output = self.cfg.get("output") or detect_output()
+        for d in DEFAULT_DIRS:
+            d.mkdir(parents=True, exist_ok=True)
         self._current_page = "library"
         self._rotation_source = None
 
