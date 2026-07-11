@@ -1667,13 +1667,40 @@ class CWApp(Adw.Application):
             pass
 
     def _on_update_available(self, latest: str):
+        self._update_version = latest
         self.banner.set_title(f"Update available: v{latest} — click to download")
         self.banner.set_button_label("Download")
-        self.banner.connect("button-clicked", lambda _: self._open_releases())
+        self.banner.connect("button-clicked", lambda _: self._perform_update())
         self.banner.set_revealed(True)
 
-    def _open_releases(self):
-        Gio.AppInfo.launch_default_for_uri(RELEASES_URL)
+    def _perform_update(self):
+        latest = getattr(self, "_update_version", None)
+        if not latest:
+            return
+        if IN_FLATPAK:
+            Gio.AppInfo.launch_default_for_uri(RELEASES_URL)
+            return
+        url = f"https://raw.githubusercontent.com/PSGtatitos/papyrus/main/papyrus.py"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "papyrus-updater"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                new_code = r.read()
+        except Exception as e:
+            self.banner.set_title(f"Update failed: {e}")
+            self.banner.set_button_label("")
+            return
+        script = Path(__file__).resolve()
+        try:
+            tmp = script.with_name(script.name + ".tmp")
+            tmp.write_bytes(new_code)
+            tmp.chmod(0o755)
+            tmp.replace(script)
+            self.banner.set_title(f"Updated to v{latest}. Restart the app.")
+            self.banner.set_button_label("")
+        except PermissionError:
+            self.banner.set_title(f"Can't write to {script.parent}. Open releases page?")
+            self.banner.set_button_label("Open")
+            self.banner.connect("button-clicked", lambda _: Gio.AppInfo.launch_default_for_uri(RELEASES_URL))
 
 if __name__ == "__main__":
     if not shutil.which("mpvpaper") and not Path("/app/bin/mpvpaper").exists():
