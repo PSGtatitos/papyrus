@@ -1,113 +1,198 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-REPO_RAW="https://raw.githubusercontent.com/PSGtatitos/papyrus/main"
-INSTALL_DIR="$HOME/.local/bin"
-DESKTOP_DIR="$HOME/.local/share/applications"
-ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+REPO="https://github.com/PSGtatitos/papyrus"
+VERSION="1.2.1"
 
-CYAN='\033[0;36m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# --- Utils ---
+die() { echo -e "\033[31mError: $*\033[0m" >&2; exit 1; }
+info() { echo -e "\033[36m==>\033[0m $*"; }
+warn() { echo -e "\033[33mWarning:\033[0m $*"; }
 
-info()    { echo -e "${CYAN}[papyrus]${NC} $1"; }
-success() { echo -e "${GREEN}[papyrus]${NC} $1"; }
-warn()    { echo -e "${YELLOW}[papyrus]${NC} $1"; }
+# --- Distro detection ---
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO_ID="$ID"
+        DISTRO_LIKE="$ID_LIKE"
+    elif command -v lsb_release &>/dev/null; then
+        DISTRO_ID="$(lsb_release -is | tr '[:upper:]' '[:lower:]')"
+    else
+        die "Cannot detect your Linux distribution. Please install manually."
+    fi
+}
 
-echo ""
-echo -e "${CYAN}"
-echo "  ██████╗  █████╗ ██████╗ ██╗   ██╗██████╗ ██╗   ██╗███████╗"
-echo "  ██╔══██╗██╔══██╗██╔══██╗╚██╗ ██╔╝██╔══██╗██║   ██║██╔════╝"
-echo "  ██████╔╝███████║██████╔╝ ╚████╔╝ ██████╔╝██║   ██║███████╗"
-echo "  ██╔═══╝ ██╔══██║██╔═══╝   ╚██╔╝  ██╔══██╗██║   ██║╚════██║"
-echo "  ██║     ██║  ██║██║        ██║   ██║  ██║╚██████╔╝███████║"
-echo "  ╚═╝     ╚═╝  ╚═╝╚═╝        ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝"
-echo -e "${NC}"
-echo "  Animated wallpaper manager for COSMIC"
-echo ""
+# --- Package manager helpers ---
+INSTALL_CMD=""
+UPDATE_CMD=""
+PKG_GROUPS=()
 
-# ── check OS ──────────────────────────────────────────────────────────────────
-if ! grep -qi "pop" /etc/os-release 2>/dev/null; then
-    warn "This app is designed for Pop!_OS COSMIC. Continuing anyway..."
-fi
+detect_pkg_manager() {
+    if command -v apt &>/dev/null; then
+        INSTALL_CMD="sudo apt install -y"
+        UPDATE_CMD="sudo apt update"
+        DISTRO_FAMILY="debian"
+    elif command -v pacman &>/dev/null; then
+        INSTALL_CMD="sudo pacman -S --noconfirm"
+        UPDATE_CMD="sudo pacman -Sy"
+        DISTRO_FAMILY="arch"
+        if command -v yay &>/dev/null; then
+            AUR_HELPER="yay"
+        elif command -v paru &>/dev/null; then
+            AUR_HELPER="paru"
+        fi
+    elif command -v dnf &>/dev/null; then
+        INSTALL_CMD="sudo dnf install -y"
+        UPDATE_CMD="sudo dnf check-update || true"
+        DISTRO_FAMILY="fedora"
+    elif command -v zypper &>/dev/null; then
+        INSTALL_CMD="sudo zypper install -y"
+        UPDATE_CMD="sudo zypper refresh"
+        DISTRO_FAMILY="suse"
+    else
+        die "No supported package manager found. Supported: apt, pacman, dnf, zypper"
+    fi
+}
 
-# ── system dependencies ───────────────────────────────────────────────────────
-info "Installing system dependencies..."
-sudo apt install -y \
-    python3-gi \
-    gir1.2-gtk-4.0 \
-    gir1.2-adw-1 \
-    ffmpeg \
-    git \
-    meson \
-    ninja-build \
-    libmpv-dev \
-    wayland-protocols \
-    libwayland-dev
+install_deps() {
+    info "Installing dependencies..."
 
-info "Installing Pillow..."
-pip3 install pillow --break-system-packages --quiet 2>/dev/null || python3 -m pip install pillow --break-system-packages --quiet
+    case "$DISTRO_FAMILY" in
+        debian)
+            $UPDATE_CMD
+            $INSTALL_CMD \
+                python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+                ffmpeg python3-pip python3-pil \
+                libmpv-dev libwayland-dev wayland-protocols \
+                meson ninja-build pkg-config git
+            pip3 install pillow --break-system-packages 2>/dev/null || true
+            ;;
+        arch)
+            $UPDATE_CMD
+            $INSTALL_CMD \
+                python python-gobject gtk4 libadwaita \
+                ffmpeg python-pillow \
+                libmpv wayland wayland-protocols \
+                meson ninja pkgconf git base-devel
+            if [ -n "${AUR_HELPER:-}" ]; then
+                info "Installing mpvpaper from AUR via $AUR_HELPER..."
+                $AUR_HELPER -S --noconfirm mpvpaper 2>/dev/null || warn "Could not install mpvpaper from AUR, will build from source"
+            fi
+            ;;
+        fedora)
+            $UPDATE_CMD
+            $INSTALL_CMD \
+                python3 python3-gobject gtk4-devel libadwaita \
+                ffmpeg python3-pillow python3-pip \
+                libmpv-devel wayland-devel wayland-protocols-devel \
+                meson ninja-build pkgconfig git gcc
+            pip3 install pillow --break-system-packages 2>/dev/null || true
+            ;;
+        suse)
+            $UPDATE_CMD
+            $INSTALL_CMD \
+                python3 python3-gobject python3-gobject-Gtk \
+                gtk4-devel libadwaita \
+                ffmpeg python3-pillow python3-pip \
+                libmpv-devel libwayland-devel wayland-protocols-devel \
+                meson ninja pkg-config git gcc
+            pip3 install pillow --break-system-packages 2>/dev/null || true
+            ;;
+    esac
+}
 
-# ── mpvpaper ──────────────────────────────────────────────────────────────────
-if command -v mpvpaper &>/dev/null; then
-    success "mpvpaper already installed, skipping"
-else
+build_mpvpaper() {
+    if command -v mpvpaper &>/dev/null; then
+        info "mpvpaper already installed, skipping build"
+        return 0
+    fi
     info "Building mpvpaper from source..."
-    TMP=$(mktemp -d)
-    git clone --single-branch https://github.com/GhostNaN/mpvpaper "$TMP/mpvpaper"
-    cd "$TMP/mpvpaper"
-    meson setup build --prefix=/usr/local
+    TMP_DIR="$(mktemp -d)"
+    git clone --depth 1 --branch 1.5 https://github.com/GhostNaN/mpvpaper.git "$TMP_DIR/mpvpaper"
+    cd "$TMP_DIR/mpvpaper"
+    CFLAGS="-Wno-error=incompatible-pointer-types" meson setup build
     ninja -C build
-    sudo ninja -C build install
-    cd -
-    rm -rf "$TMP"
-    success "mpvpaper installed"
-fi
+    sudo cp build/mpvpaper /usr/local/bin/
+    sudo cp build/mpvpaper-holder /usr/local/bin/
+    cd /
+    rm -rf "$TMP_DIR"
+    info "mpvpaper installed to /usr/local/bin"
+}
 
-# ── install Papyrus ───────────────────────────────────────────────────────────
-info "Installing Papyrus..."
-mkdir -p "$INSTALL_DIR" "$DESKTOP_DIR" "$ICON_DIR"
+install_papyrus() {
+    info "Installing Papyrus..."
 
-# download script directly from GitHub
-curl -fsSL "$REPO_RAW/papyrus.py" -o "$INSTALL_DIR/papyrus"
-chmod +x "$INSTALL_DIR/papyrus"
+    SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# download icon
-curl -fsSL "$REPO_RAW/assets/icon.png" -o "$ICON_DIR/io.github.PSGtatitos.papyrus.png"
-ICON="io.github.PSGtatitos.papyrus"
+    sudo mkdir -p /usr/local/bin
+    sudo mkdir -p /usr/local/share/applications
+    sudo mkdir -p /usr/local/share/metainfo
+    sudo mkdir -p /usr/local/share/icons/hicolor/256x256/apps
 
-# desktop entry
-cat > "$DESKTOP_DIR/io.github.PSGtatitos.papyrus.desktop" << DESKTOP
-[Desktop Entry]
-Type=Application
-Name=Papyrus
-Comment=Animated wallpaper manager for COSMIC
-Exec=$INSTALL_DIR/papyrus
-Icon=$ICON
-Terminal=false
-Categories=Utility;GTK;
-Keywords=wallpaper;animated;video;COSMIC;
-DESKTOP
+    sudo cp "$SRC_DIR/papyrus.py" /usr/local/bin/papyrus
+    sudo chmod 755 /usr/local/bin/papyrus
 
-update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+    # Update desktop file with correct path
+    sed "s|Exec=papyrus|Exec=/usr/local/bin/papyrus|" \
+        "$SRC_DIR/io.github.PSGtatitos.papyrus.desktop" | \
+        sudo tee /usr/local/share/applications/io.github.PSGtatitos.papyrus.desktop > /dev/null
 
-# create default wallpaper folder
-WALLPAPER_DIR="$HOME/Wallpapers/Papyrus"
-mkdir -p "$WALLPAPER_DIR"
-success "Wallpaper folder created at $WALLPAPER_DIR"
-info "Drop your video files there and Papyrus will find them automatically."
+    sudo cp "$SRC_DIR/io.github.PSGtatitos.papyrus.metainfo.xml" \
+        /usr/local/share/metainfo/
 
-# ensure ~/.local/bin is in PATH
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    warn "~/.local/bin is not in your PATH."
-    warn "Add this to your ~/.bashrc or ~/.zshrc:"
-    warn '  export PATH="$HOME/.local/bin:$PATH"'
-fi
+    sudo cp "$SRC_DIR/assets/icon.png" \
+        /usr/local/share/icons/hicolor/256x256/apps/io.github.PSGtatitos.papyrus.png
 
-echo ""
-success "Papyrus installed successfully!"
-echo ""
-echo -e "  Run it:   ${CYAN}papyrus${NC}"
-echo -e "  Or find it in your app launcher"
-echo ""
+    info "Papyrus installed to /usr/local"
+}
+
+post_install() {
+    info "Updating desktop database..."
+    sudo update-desktop-database 2>/dev/null || true
+    sudo gtk-update-icon-cache /usr/local/share/icons/hicolor/ 2>/dev/null || true
+    sudo gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
+
+    mkdir -p "$HOME/Wallpapers/Papyrus" 2>/dev/null || true
+
+    echo ""
+    echo -e "\033[32mPapyrus v$VERSION installed successfully!\033[0m"
+    echo ""
+    echo "  Run: papyrus"
+    echo ""
+    echo "  Add video files to ~/Wallpapers/Papyrus"
+    echo "  or add folders from the app's sidebar."
+    echo ""
+    echo "  To uninstall:"
+    echo "    sudo rm /usr/local/bin/papyrus /usr/local/bin/mpvpaper /usr/local/bin/mpvpaper-holder"
+    echo "    sudo rm /usr/local/share/applications/io.github.PSGtatitos.papyrus.desktop"
+    echo "    sudo rm /usr/local/share/metainfo/io.github.PSGtatitos.papyrus.metainfo.xml"
+    echo "    sudo rm /usr/local/share/icons/hicolor/256x256/apps/io.github.PSGtatitos.papyrus.png"
+}
+
+# --- Main ---
+main() {
+    echo "Papyrus v$VERSION Installer"
+    echo "=========================="
+    echo ""
+
+    detect_distro
+    detect_pkg_manager
+
+    echo "Detected: $DISTRO_ID ($DISTRO_FAMILY)"
+    echo ""
+
+    if [ "$(id -u)" = "0" ]; then
+        die "Do not run this script as root. It will use sudo when needed."
+    fi
+
+    if ! command -v sudo &>/dev/null; then
+        die "sudo is required but not installed."
+    fi
+
+    install_deps
+    build_mpvpaper
+    install_papyrus
+    post_install
+}
+
+main "$@"
