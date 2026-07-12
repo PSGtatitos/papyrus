@@ -17,13 +17,16 @@
       <li>Auto-theme — extracts the dominant color and applies it as your COSMIC accent</li>
       <li>Auto dark/light mode based on wallpaper brightness</li>
       <li>Playlist rotation with configurable interval and random/sequential order</li>
+      <li>Self-update — checks for new versions and installs them with one click</li>
       <li>Thumbnail previews auto-generated from your video files</li>
       <li>Start on login toggle</li>
       <li>No telemetry, no accounts, no cloud</li>
     </ul>
   </description>
 
-  <developer_name>PSGtatitos</developer_name>
+  <developer id="io.github.PSGtatitos">
+    <name>PSGtatitos</name>
+  </developer>
 
   <url type="homepage">https://github.com/PSGtatitos/papyrus</url>
   <url type="bugtracker">https://github.com/PSGtatitos/papyrus/issues</url>
@@ -32,6 +35,27 @@
   <launchable type="desktop-id">io.github.PSGtatitos.papyrus.desktop</launchable>
 
   <releases>
+    <release version="1.2.2" date="2026-07-09">
+      <description>
+        <p>Self-update, universal install script, .deb releases.</p>
+        <ul>
+          <li>One-click self-update from within the app (downloads and replaces itself)</li>
+          <li>Universal install script supporting apt, pacman, dnf, zypper</li>
+          <li>Automated .deb builds with bundled mpvpaper via GitHub Actions</li>
+          <li>Fixed update version detection (handles -temp suffixes)</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.2.1" date="2026-07-09">
+      <description>
+        <p>Bug fixes and packaging improvements.</p>
+        <ul>
+          <li>Create default wallpaper directories on first launch</li>
+          <li>Fixed icon filename in .deb packages</li>
+          <li>Desktop file uses absolute path for reliable launcher launch</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.0" date="2026-07-08">
       <description>
         <p>Playlist rotation, improved Flatpak support, bug fixes.</p>
