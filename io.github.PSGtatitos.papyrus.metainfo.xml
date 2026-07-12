@@ -3,6 +3,7 @@
   <id>io.github.PSGtatitos.papyrus</id>
   <name>Papyrus</name>
   <summary>Animated wallpaper manager for Pop!_OS COSMIC</summary>
+  <project_group>COSMIC</project_group>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
@@ -24,7 +25,7 @@
     </ul>
   </description>
 
-  <developer id="io.github.PSGtatitos">
+  <developer id="io.github.psgtatitos">
     <name>PSGtatitos</name>
   </developer>
 
@@ -83,6 +84,18 @@
       </description>
     </release>
   </releases>
+
+  <categories>
+    <category>COSMIC</category>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>COSMIC</keyword>
+    <keyword>wallpaper</keyword>
+    <keyword>animated</keyword>
+    <keyword>video</keyword>
+  </keywords>
 
   <content_rating type="oars-1.1" />
 

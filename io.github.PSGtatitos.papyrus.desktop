@@ -2,7 +2,7 @@
 Type=Application
 Name=Papyrus
 Comment=Animated wallpaper manager for COSMIC
-Exec=/usr/bin/papyrus
+Exec=papyrus
 Icon=io.github.PSGtatitos.papyrus
 Terminal=false
 Categories=GTK;Utility;
