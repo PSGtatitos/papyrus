@@ -43,7 +43,7 @@ APT_DEPS=(
 )
 PACMAN_DEPS=(
     python-gobject gtk4 libadwaita ffmpeg
-    git meson ninja libmpv wayland wayland-protocols base-devel
+    git meson ninja mpv wayland wayland-protocols base-devel
 )
 DNF_DEPS=(
     python3-gobject gtk4-devel libadwaita ffmpeg-free
