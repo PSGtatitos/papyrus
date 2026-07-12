@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.1"
+VERSION      = "1.2.2"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -1680,7 +1680,7 @@ class CWApp(Adw.Application):
         if IN_FLATPAK:
             Gio.AppInfo.launch_default_for_uri(RELEASES_URL)
             return
-        url = f"https://raw.githubusercontent.com/PSGtatitos/papyrus/main/papyrus.py"
+        url = "https://raw.githubusercontent.com/PSGtatitos/papyrus/main/papyrus.py"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "papyrus-updater"})
             with urllib.request.urlopen(req, timeout=10) as r:
@@ -1701,6 +1701,9 @@ class CWApp(Adw.Application):
             self.banner.set_title(f"Can't write to {script.parent}. Open releases page?")
             self.banner.set_button_label("Open")
             self.banner.connect("button-clicked", lambda _: Gio.AppInfo.launch_default_for_uri(RELEASES_URL))
+
+    def _open_releases(self):
+        Gio.AppInfo.launch_default_for_uri(RELEASES_URL)
 
 if __name__ == "__main__":
     if not shutil.which("mpvpaper") and not Path("/app/bin/mpvpaper").exists():
