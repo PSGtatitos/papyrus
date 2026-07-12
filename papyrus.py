@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.2"
+VERSION      = "1.2.1-temp"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -39,10 +39,10 @@ def check_for_updates(callback):
             )
             with urllib.request.urlopen(req, timeout=5) as r:
                 data = json.loads(r.read().decode())
-                latest = data.get("tag_name", "").lstrip("v")
+                latest = data.get("tag_name", "").lstrip("v").split("-")[0].split("+")[0]
                 if not latest:
                     return
-                current = [int(x) for x in VERSION.split(".")]
+                current = [int(x) for x in VERSION.split("-")[0].split("+")[0].split(".")]
                 remote  = [int(x) for x in latest.split(".")]
                 if remote > current:
                     GLib.idle_add(callback, latest)
