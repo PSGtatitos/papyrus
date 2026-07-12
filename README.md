@@ -1,12 +1,13 @@
 <div align="center">
   <img src="assets/icon.png" alt="Papyrus Logo" width="128" height="128">
   <h1>Papyrus</h1>
-  <p>Animated wallpaper picker for Pop!_OS COSMIC</p>
+  <p>Animated wallpaper manager for Pop!_OS COSMIC</p>
 
   ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
   ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
   ![DE](https://img.shields.io/badge/DE-COSMIC-orange)
   ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+  [![Build .deb](https://github.com/PSGtatitos/papyrus/actions/workflows/build-deb.yml/badge.svg)](https://github.com/PSGtatitos/papyrus/actions/workflows/build-deb.yml)
 
 </div>
 
@@ -21,69 +22,54 @@ It also automatically extracts the dominant color from your wallpaper and applie
 ## Features
 
 - 🎬 **Animated wallpapers** — supports MP4, WebM, MKV, AVI, MOV
+- 🔄 **Playlist rotation** — auto-switch wallpapers at a set interval (random or sequential order)
 - 🎨 **Auto-theme** — extracts accent color from wallpaper and applies it to COSMIC
 - 🌙 **Auto dark/light mode** — detects wallpaper brightness and switches accordingly
 - 📁 **Folder picker** — choose any folder of video files to scan
 - 🖼️ **Thumbnail previews** — auto-generated from your video files
 - 🔁 **Start on login** — one toggle to persist your wallpaper across reboots
-- ⏩ **Sequential/Random Wallpaper Changing** — change your wallpaper in random or sequuential order with a set interval in settings
+- ⬆️ **Self-update** — app checks for updates and can download & install them with one click
 - 🚫 **No telemetry, no accounts, no cloud** — config is a plain JSON file
 
 ## COSMIC Store
-Papyrus got succesfully merged into the cosmic-flatpak repositories so and the app can be installed directly by the COSMIC Store.
-You can also choose to install Papyrus manually by following the installation steps mentioned in the Installation section.
 
-## Requirements
-
-- Pop!_OS 24.04 with COSMIC desktop
-- `mpvpaper` (installed automatically)
-- `ffmpeg`
-- Python 3.10+
-- `python3-gi`, GTK4, libadwaita
+Papyrus is available in the [cosmic-flatpak](https://github.com/cosmic-utils/cosmic-flatpak) repository and can be installed directly from the COSMIC Store. You can also install manually.
 
 ## Installation
-First make sure that you have pip3 installed, if you don't have it you can install it via these commands:
 
-```bash
-sudo apt update
-sudo apt install python3-pip
-```
-And then run the installer:
+### Quick install (any distro)
+
+The universal installer detects your distro and handles everything:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PSGtatitos/papyrus/main/install.sh | bash
 ```
 
-The install script handles everything — system dependencies, mpvpaper, Pillow, and the app itself.
+Supports: Pop, Ubuntu, Debian, Arch, CachyOS, Manjaro, Fedora, openSUSE
 
-### Manual install
+### .deb package (Debian/Ubuntu/Pop)
 
-**1. Install system dependencies**
-
-```bash
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 ffmpeg
-pip install pillow --break-system-packages
-```
-
-**2. Install mpvpaper from source**
+Download the latest `.deb` from the [releases page](https://github.com/PSGtatitos/papyrus/releases) and install:
 
 ```bash
-sudo apt install git meson ninja-build libmpv-dev wayland-protocols libwayland-dev
-git clone --single-branch https://github.com/GhostNaN/mpvpaper
-cd mpvpaper
-meson setup build --prefix=/usr/local
-ninja -C build
-sudo ninja -C build install
-cd ..
+sudo apt install ./papyrus_*.deb
 ```
 
-**3. Install Papyrus**
+The `.deb` bundles mpvpaper and includes all dependencies.
+
+### COSMIC Store (Flatpak)
+
+Search for "Papyrus" in the COSMIC Store or run:
 
 ```bash
-git clone https://github.com/PSGtatitos/papyrus
-cd papyrus
-chmod +x install.sh
-./install.sh
+flatpak install io.github.PSGtatitos.papyrus
 ```
+
+## Updating
+
+- **Local install:** Run `./update.sh` or re-run the installer. The app can also self-update from the banner.
+- **.deb install:** Download the latest `.deb` from the releases page and reinstall.
+- **Flatpak:** Updated automatically via the COSMIC Store.
 
 ## Usage
 
@@ -94,10 +80,11 @@ papyrus
 ```
 
 - **Click** any thumbnail to set it as your wallpaper
-- **Folder** button (top left) to change the wallpaper folder
+- **Folder** button (top left) to add wallpaper folders
+- **Playlist** tab in Settings to enable auto-rotation with configurable interval (random or sequential)
 - **Auto-theme DE** toggle to enable/disable automatic COSMIC theming
-- **Start on login** toggle to persist wallpaper across reboots
 - **Stop** button (top right) to remove the wallpaper
+- Update banner appears automatically when a new version is available
 
 ## Where to find animated wallpapers
 
@@ -137,18 +124,34 @@ Config is stored at `~/.config/papyrus/config.json`:
   "current": "/home/user/Wallpapers/Papyrus/my-wallpaper.mp4",
   "dirs": ["/home/user/Wallpapers/Papyrus"],
   "output": "HDMI-A-1",
-  "auto_theme": true
+  "auto_theme": true,
+  "rotation": true,
+  "interval": 30,
+  "order": "random"
 }
 ```
+
 ## Uninstall
 
+**Local install:**
 ```bash
 rm ~/.local/bin/papyrus
-rm ~/.local/share/applications/io.github.papyrus.desktop
-rm ~/.local/share/icons/hicolor/256x256/apps/io.github.papyrus.png
+rm ~/.local/share/applications/io.github.PSGtatitos.papyrus.desktop
+rm ~/.local/share/icons/hicolor/256x256/apps/io.github.PSGtatitos.papyrus.png
 rm -rf ~/.config/papyrus
 rm -f ~/.config/autostart/papyrus.desktop
 update-desktop-database ~/.local/share/applications
+```
+
+**.deb install:**
+```bash
+sudo apt remove --purge papyrus
+rm -rf ~/.config/papyrus
+```
+
+**Flatpak:**
+```bash
+flatpak uninstall io.github.PSGtatitos.papyrus
 ```
 
 ## Contributing
