@@ -1,0 +1,5 @@
+__pycache__
+.flatpak-builder
+.opencode
+.vscode
+ARCHITECTURE.md
