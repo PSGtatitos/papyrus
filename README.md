@@ -8,6 +8,7 @@
   ![DE](https://img.shields.io/badge/DE-COSMIC-orange)
   ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
   [![Build .deb](https://github.com/PSGtatitos/papyrus/actions/workflows/build-deb.yml/badge.svg)](https://github.com/PSGtatitos/papyrus/actions/workflows/build-deb.yml)
+  [![AUR](https://img.shields.io/aur/version/papyrus-wallpaper)](https://aur.archlinux.org/packages/papyrus-wallpaper)
 
 </div>
 
@@ -45,7 +46,19 @@ The universal installer detects your distro and handles everything:
 curl -fsSL https://raw.githubusercontent.com/PSGtatitos/papyrus/main/install.sh | bash
 ```
 
-Supports: Pop, Ubuntu, Debian, Arch, CachyOS, Manjaro, Fedora, openSUSE
+Supports: Pop, Ubuntu, Debian, Fedora, openSUSE. Arch-based users should use the [AUR package](#aur-arch-linux--cachyos--manjaro) instead.
+
+### AUR (Arch Linux / CachyOS / Manjaro)
+
+Install from the AUR using your preferred AUR helper:
+
+```bash
+yay -S papyrus-wallpaper
+# or
+paru -S papyrus-wallpaper
+```
+
+Dependencies (`mpvpaper`, `python-gobject`, `gtk4`, etc.) are handled automatically.
 
 ### .deb package (Debian/Ubuntu/Pop)
 
@@ -70,6 +83,7 @@ flatpak install io.github.PSGtatitos.papyrus
 - **Local install:** Run `./update.sh` or re-run the installer. The app can also self-update from the banner.
 - **.deb install:** Download the latest `.deb` from the releases page and reinstall.
 - **Flatpak:** Updated automatically via the COSMIC Store.
+- **AUR:** Updated via your AUR helper (`yay -Syu` or `paru -Syu`).
 
 ## Usage
 
@@ -146,6 +160,12 @@ update-desktop-database ~/.local/share/applications
 **.deb install:**
 ```bash
 sudo apt remove --purge papyrus
+rm -rf ~/.config/papyrus
+```
+
+**AUR:**
+```bash
+yay -Rns papyrus-wallpaper
 rm -rf ~/.config/papyrus
 ```
 

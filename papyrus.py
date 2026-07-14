@@ -88,8 +88,8 @@ def kill_mpvpaper():
 
 def _mpvpaper_cmd(output, path):
     if Path("/app/bin/mpvpaper").exists():
-        return ["flatpak-spawn", "--host", "mpvpaper", "-o", "loop --no-audio", output, path]
-    return ["mpvpaper", "-o", "loop --no-audio", output, path]
+        return ["flatpak-spawn", "--host", "mpvpaper", "-o", "loop-file=inf --no-audio", output, path]
+    return ["mpvpaper", "-o", "loop-file=inf --no-audio", output, path]
 
 def detect_output():
     try:
@@ -303,6 +303,21 @@ def get_thumb_large(path: Path) -> Path:
             capture_output=True,
         )
     return thumb
+
+def get_video_resolution(path: Path) -> str:
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0",
+             str(path)],
+            capture_output=True, text=True, timeout=5,
+        )
+        out = r.stdout.strip()
+        if out and "x" in out:
+            return out
+    except Exception:
+        pass
+    return "Unknown"
 
 def short_name(path: Path, n=22):
     s = path.stem
@@ -1281,7 +1296,7 @@ class CWApp(Adw.Application):
         res_hdr = Gtk.Label(label="RESOLUTION", xalign=0)
         res_hdr.add_css_class("status-label")
         res_box.append(res_hdr)
-        res_val = Gtk.Label(label="1920 × 1080", xalign=0)
+        res_val = Gtk.Label(label=get_video_resolution(path_obj), xalign=0)
         res_val.add_css_class("control-label")
         res_box.append(res_val)
         metrics.append(res_box)
