@@ -23,6 +23,8 @@ It also automatically extracts the dominant color from your wallpaper and applie
 ## Features
 
 - 🎬 **Animated wallpapers** — supports MP4, WebM, MKV, AVI, MOV
+- 🖥️ **Per-monitor wallpapers** — set different videos on each monitor independently
+- 📐 **Per-monitor scaling** — choose Fit, Fill, or Stretch for each output
 - 🔄 **Playlist rotation** — auto-switch wallpapers at a set interval (random or sequential order)
 - 🎨 **Auto-theme** — extracts accent color from wallpaper and applies it to COSMIC
 - 🌙 **Auto dark/light mode** — detects wallpaper brightness and switches accordingly

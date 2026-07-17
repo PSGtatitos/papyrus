@@ -68,39 +68,54 @@ def load_config():
             return json.loads(CONFIG_FILE.read_text())
         except Exception:
             pass
-    return {"current": None, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*", "auto_theme": False,
-            "rotation": False, "interval": 30, "order": "random", "seq_index": 0}
+    return {"current": None, "wallpapers": {}, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*",
+            "scaling": {}, "auto_theme": False, "rotation": False, "interval": 30, "order": "random", "seq_index": 0}
 
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
 
-_mpvpaper_pids = set()
+_mpvpaper_pids = {}  # output → pid
 
-def kill_mpvpaper():
-    for pid in list(_mpvpaper_pids):
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    _mpvpaper_pids.clear()
-    subprocess.run(["pkill", "-f", "mpvpaper"], capture_output=True)
+def kill_mpvpaper(output=None):
+    if output:
+        pid = _mpvpaper_pids.pop(output, None)
+        if pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+    else:
+        for pid in list(_mpvpaper_pids.values()):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        _mpvpaper_pids.clear()
 
-def _mpvpaper_cmd(output, path):
+def _mpvpaper_cmd(output, path, scaling="fit"):
+    opts = "loop-file=inf --no-audio"
+    if scaling == "fill":
+        opts += " --video-fit=fill"
+    elif scaling == "stretch":
+        opts += " --video-fit=stretch"
     if Path("/app/bin/mpvpaper").exists():
-        return ["flatpak-spawn", "--host", "mpvpaper", "-o", "loop-file=inf --no-audio", output, path]
-    return ["mpvpaper", "-o", "loop-file=inf --no-audio", output, path]
+        return ["flatpak-spawn", "--host", "mpvpaper", "-o", opts, output, path]
+    return ["mpvpaper", "-o", opts, output, path]
 
-def detect_output():
+def detect_outputs():
     try:
         from gi.repository import Gdk
         display = Gdk.Display.get_default()
         if display:
             monitors = display.get_monitors()
-            if monitors.get_n_items() > 0:
-                monitor = monitors.get_item(0)
-                if hasattr(monitor, "get_connector") and monitor.get_connector():
-                    return monitor.get_connector()
+            outs = []
+            for i in range(monitors.get_n_items()):
+                mon = monitors.get_item(i)
+                if hasattr(mon, "get_connector") and mon.get_connector():
+                    outs.append(mon.get_connector())
+            if outs:
+                return outs
     except Exception as e:
         print(f"[papyrus] Native Gdk display detection failed: {e}")
 
@@ -109,21 +124,25 @@ def detect_output():
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if r.returncode != 0:
                 continue
+            outs = []
             for line in r.stdout.splitlines():
-                if cmd[0] == "wlr-randr" and "connected" in line:
-                    return line.split()[0]
+                if cmd[0] == "wlr-randr" and " connected" in line:
+                    outs.append(line.split()[0])
+            if outs:
+                return outs
         except Exception:
             continue
 
-    return "*"
+    return ["*"]
 
-def apply_wallpaper(path: str, output: str):
-    kill_mpvpaper()
+def apply_wallpaper(path: str, output: str, scaling="fit"):
+    kill_mpvpaper(output)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = CONFIG_DIR / "mpvpaper.log"
-    cmd = _mpvpaper_cmd(output, path)
+    cmd = _mpvpaper_cmd(output, path, scaling)
     ts = datetime.now().isoformat()
-    log_file.write_text(f"[{ts}] running: {' '.join(cmd)}\n")
+    with log_file.open("a") as f:
+        f.write(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
         proc = subprocess.Popen(
             cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -135,24 +154,32 @@ def apply_wallpaper(path: str, output: str):
             f.write(f"[{ts}] {msg}\n")
         return None, msg
 
-    _mpvpaper_pids.add(proc.pid)
+    _mpvpaper_pids[output] = proc.pid
     ts = datetime.now().isoformat()
     with log_file.open("a") as f:
-        f.write(f"[{ts}] mpvpaper PID: {proc.pid}\n")
+        f.write(f"[{ts}] mpvpaper PID: {proc.pid} (output: {output})\n")
 
     return proc, None
 
-def write_autostart(path: str, output: str):
+def write_autostart(wallpapers: dict, scaling: dict):
     if IN_FLATPAK:
         return
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
-    AUTOSTART.write_text(
-        "[Desktop Entry]\n"
-        "Type=Application\n"
-        "Name=Papyrus\n"
-        f'Exec=mpvpaper -o "loop" {output} {path}\n'
-        "X-GNOME-Autostart-enabled=true\n"
-    )
+    lines = [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Papyrus",
+    ]
+    for output, path in wallpapers.items():
+        sc = scaling.get(output, "fit")
+        opts = "loop-file=inf --no-audio"
+        if sc == "fill":
+            opts += " --video-fit=fill"
+        elif sc == "stretch":
+            opts += " --video-fit=stretch"
+        lines.append(f'Exec=mpvpaper -o "{opts}" {output} {path}')
+    lines.append("X-GNOME-Autostart-enabled=true")
+    AUTOSTART.write_text("\n".join(lines) + "\n")
 
 def remove_autostart():
     if IN_FLATPAK:
@@ -754,7 +781,9 @@ class CWApp(Adw.Application):
         )
         self.connect("activate", self._activate)
         self.cfg = load_config()
-        self.output = self.cfg.get("output") or detect_output()
+        self.outputs = detect_outputs()
+        self._selected_output = self.outputs[0]
+        self._selected_scaling = "fit"
         for d in DEFAULT_DIRS:
             d.mkdir(parents=True, exist_ok=True)
         self._current_page = "library"
@@ -825,9 +854,10 @@ class CWApp(Adw.Application):
 
         self._populate()
 
-        current = self.cfg.get("current")
-        if current:
-            self.header_title.set_subtitle(f"Active: {Path(current).name}")
+        wallpapers = self.cfg.get("wallpapers", {}) or {}
+        if not wallpapers and self.cfg.get("current"):
+            wallpapers[self.cfg.get("output", "*")] = self.cfg["current"]
+        self._update_footer(wallpapers)
 
         if self.cfg.get("rotation", False):
             self._start_rotation()
@@ -998,13 +1028,9 @@ class CWApp(Adw.Application):
         out_text.append(out_desc)
         out_box.append(out_text)
 
-        output_options = ["All Monitors", "DP-1 (Primary)", "HDMI-1", "eDP-1"]
+        output_options = ["All Monitors"] + self.outputs
         self.output_dropdown = Gtk.DropDown.new_from_strings(output_options)
-        try:
-            idx = output_options.index(next(o for o in output_options if self.output in o or (self.output == "*" and o == "All Monitors")))
-        except (StopIteration, ValueError):
-            idx = 0
-        self.output_dropdown.set_selected(idx)
+        self.output_dropdown.set_selected(0)
         self.output_dropdown.set_valign(Gtk.Align.CENTER)
         self.output_dropdown.connect("notify::selected", self._on_output_changed)
         out_box.append(self.output_dropdown)
@@ -1227,7 +1253,7 @@ class CWApp(Adw.Application):
         sep.set_size_request(1, 12)
         left.append(sep)
 
-        self.monitor_lbl = Gtk.Label(label=f"Output: {self.output}")
+        self.monitor_lbl = Gtk.Label(label="No wallpaper active")
         self.monitor_lbl.add_css_class("status-label")
         left.append(self.monitor_lbl)
 
@@ -1318,11 +1344,39 @@ class CWApp(Adw.Application):
         metrics.append(size_box)
         sidebar.append(metrics)
 
+        # Output selector
+        out_selector = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        out_selector.add_css_class("settings-row")
+        out_hdr = Gtk.Label(label="OUTPUT", xalign=0)
+        out_hdr.add_css_class("status-label")
+        out_selector.append(out_hdr)
+        out_names = ["All Monitors"] + self.outputs
+        self._detail_output_dd = Gtk.DropDown.new_from_strings(out_names)
+        self._detail_output_dd.set_selected(0)
+        self._detail_output_dd.set_halign(Gtk.Align.FILL)
+        self._detail_output_dd.set_hexpand(True)
+        out_selector.append(self._detail_output_dd)
+        sidebar.append(out_selector)
+
+        # Scaling selector
+        sc_selector = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        sc_selector.add_css_class("settings-row")
+        sc_hdr = Gtk.Label(label="SCALING", xalign=0)
+        sc_hdr.add_css_class("status-label")
+        sc_selector.append(sc_hdr)
+        self._detail_scaling_dd = Gtk.DropDown.new_from_strings(["Fit", "Fill", "Stretch"])
+        self._detail_scaling_dd.set_selected(0)
+        self._detail_scaling_dd.set_halign(Gtk.Align.FILL)
+        self._detail_scaling_dd.set_hexpand(True)
+        sc_selector.append(self._detail_scaling_dd)
+        sidebar.append(sc_selector)
+
         # Apply button
         apply_btn = Gtk.Button(label="Apply Wallpaper")
         apply_btn.add_css_class("primary-btn")
         apply_btn.set_halign(Gtk.Align.FILL)
-        apply_btn.connect("clicked", lambda _: self._apply(str(path_obj)))
+        self._detail_path = str(path_obj)
+        apply_btn.connect("clicked", lambda _: self._apply(self._detail_path))
         sidebar.append(apply_btn)
 
         # Back to library
@@ -1391,7 +1445,9 @@ class CWApp(Adw.Application):
         self._refresh_folder_list()
 
         videos = scan_videos(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
+        wallpapers = self.cfg.get("wallpapers", {}) or {}
         current = self.cfg.get("current")
+        active_paths = set(wallpapers.values())
 
         self.header_title.set_subtitle(f"{len(videos)} items found")
 
@@ -1413,7 +1469,7 @@ class CWApp(Adw.Application):
             return
 
         for v in videos:
-            self.flow.append(self._make_card(v, active=str(v) == current))
+            self.flow.append(self._make_card(v, active=str(v) in active_paths))
 
     def _refresh_folder_list(self):
         while child := self.folder_list_box.get_first_child():
@@ -1527,39 +1583,62 @@ class CWApp(Adw.Application):
             self.stack.set_visible_child_name("detail")
             self._update_header_for_page("detail", path_obj.name)
 
+    def _update_footer(self, wallpapers):
+        if not wallpapers:
+            self.monitor_lbl.set_label("No wallpaper active")
+            return
+        parts = []
+        for out, wp in wallpapers.items():
+            name = Path(wp).stem[:16]
+            lbl = out if out == "*" else out
+            parts.append(f"{lbl}: {name}")
+        self.monitor_lbl.set_label(" | ".join(parts))
+
     def _update_header_info(self, text):
         pass
 
     def _apply(self, path: str):
         print(f"[papyrus] _apply called with {path}")
-        proc, err = apply_wallpaper(path, self.output)
-        if err:
-            print(f"[papyrus] _apply error: {err}")
-            self.banner.set_title(err)
-            return
+
+        dd_idx = self._detail_output_dd.get_selected()
+        scaling_idx = self._detail_scaling_dd.get_selected()
+        scaling = ["fit", "fill", "stretch"][scaling_idx]
+        targets = ["*"] if dd_idx == 0 else [self.outputs[dd_idx - 1]]
+
+        last_status = ""
+        for output in targets:
+            proc, err = apply_wallpaper(path, output, scaling)
+            if err:
+                print(f"[papyrus] _apply error on {output}: {err}")
+                self.banner.set_title(err)
+                continue
+            wallpapers = self.cfg.setdefault("wallpapers", {})
+            wallpapers[output] = path
+            sc_map = self.cfg.setdefault("scaling", {})
+            sc_map[output] = scaling
+            save_config(self.cfg)
+
+            thumb = get_thumb(Path(path))
+            if self.cfg.get("auto_theme", False) and thumb.exists():
+                ok = apply_cosmic_theme(thumb, self.cfg.get("auto_dark", True))
+                last_status = f"Active: {Path(path).name}" + (" · theme applied" if ok else " · theme failed")
+            else:
+                last_status = f"Active: {Path(path).name}"
+
+            def monitor(p=proc):
+                if p.poll() is not None and p.returncode != 0:
+                    GLib.idle_add(lambda: self.banner.set_title(
+                        f"mpvpaper crashed (code {p.returncode})"))
+            threading.Thread(target=monitor, daemon=True).start()
+
         self.cfg["current"] = path
-        self.cfg["output"] = self.output
         save_config(self.cfg)
+        self.banner.set_title(last_status)
 
-        thumb = get_thumb(Path(path))
-        if self.cfg.get("auto_theme", False) and thumb.exists():
-            ok = apply_cosmic_theme(thumb, self.cfg.get("auto_dark", True))
-            status = f"Active: {Path(path).name}" + (" · theme applied" if ok else " · theme failed")
-        else:
-            status = f"Active: {Path(path).name}"
-
-        self.banner.set_title(status)
         if self.autostart_sw.get_active():
-            write_autostart(path, self.output)
+            write_autostart(self.cfg.get("wallpapers", {}), self.cfg.get("scaling", {}))
 
-        def monitor():
-            import time
-            time.sleep(3)
-            if proc.poll() is not None and proc.returncode != 0:
-                GLib.idle_add(lambda: self.banner.set_title(
-                    f"mpvpaper crashed (code {proc.returncode})"))
-        threading.Thread(target=monitor, daemon=True).start()
-
+        self._update_footer(self.cfg.get("wallpapers", {}))
         self._populate()
         self._show_page("library")
 
@@ -1570,16 +1649,18 @@ class CWApp(Adw.Application):
         self._stop_rotation()
         kill_mpvpaper()
         self.cfg["current"] = None
+        self.cfg["wallpapers"] = {}
         save_config(self.cfg)
         remove_autostart()
         self.autostart_sw.set_active(False)
         self.banner.set_title("No wallpaper active")
+        self._update_footer({})
         self._populate()
 
     def _on_autostart(self, sw, _param):
-        current = self.cfg.get("current")
-        if sw.get_active() and current:
-            write_autostart(current, self.output)
+        wallpapers = self.cfg.get("wallpapers", {})
+        if sw.get_active() and wallpapers:
+            write_autostart(wallpapers, self.cfg.get("scaling", {}))
         else:
             remove_autostart()
 
@@ -1592,19 +1673,10 @@ class CWApp(Adw.Application):
         save_config(self.cfg)
 
     def _on_output_changed(self, dd, _param):
-        options = ["All Monitors", "DP-1 (Primary)", "HDMI-1", "eDP-1"]
         idx = dd.get_selected()
-        selected = options[idx]
-        mapping = {
-            "All Monitors": "*",
-            "DP-1 (Primary)": "DP-1",
-            "HDMI-1": "HDMI-1",
-            "eDP-1": "eDP-1",
-        }
-        self.output = mapping.get(selected, "*")
-        self.cfg["output"] = self.output
+        selected = "*" if idx == 0 else self.outputs[idx - 1]
+        self.cfg["output"] = selected
         save_config(self.cfg)
-        self.monitor_lbl.set_label(f"Output: {self.output}")
 
     def _collect_videos(self):
         dirs = self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS])
@@ -1618,15 +1690,28 @@ class CWApp(Adw.Application):
             return True
         order = self.cfg.get("order", "random")
         idx = self.cfg.get("seq_index", 0)
-        if order == "random":
-            pick = random.choice(videos)
-            print(f"[papyrus] rotate random: picked {pick.name}")
-        else:
-            pick = videos[idx % len(videos)]
-            print(f"[papyrus] rotate sequential ({idx}): picked {pick.name}")
-            self.cfg["seq_index"] = (idx + 1) % len(videos)
+        outputs = self.outputs
+        scaling_map = self.cfg.get("scaling", {})
+        for output in outputs:
+            if order == "random":
+                pick = random.choice(videos)
+            else:
+                pick = videos[idx % len(videos)]
+                if output == outputs[-1]:
+                    self.cfg["seq_index"] = (idx + 1) % len(videos)
+                    save_config(self.cfg)
+            print(f"[papyrus] rotate: {pick.name} → {output}")
+            proc, err = apply_wallpaper(str(pick), output, scaling_map.get(output, "fit"))
+            if err:
+                print(f"[papyrus] rotate error on {output}: {err}")
+                continue
+            wallpapers = self.cfg.setdefault("wallpapers", {})
+            wallpapers[output] = str(pick)
             save_config(self.cfg)
-        self._apply(str(pick))
+        self.cfg["current"] = str(pick)
+        save_config(self.cfg)
+        self._update_footer(self.cfg.get("wallpapers", {}))
+        self._populate()
         return True
 
     def _start_rotation(self):

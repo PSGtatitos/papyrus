@@ -15,6 +15,8 @@
     </p>
     <ul>
       <li>Animated wallpapers from MP4, WebM, MKV, AVI and MOV files</li>
+      <li>Per-monitor wallpapers — different videos on each display</li>
+      <li>Per-monitor scaling — Fit, Fill, or Stretch per output</li>
       <li>Auto-theme — extracts the dominant color and applies it as your COSMIC accent</li>
       <li>Auto dark/light mode based on wallpaper brightness</li>
       <li>Playlist rotation with configurable interval and random/sequential order</li>
