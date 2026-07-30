@@ -69,7 +69,8 @@ def load_config():
         except Exception:
             pass
     return {"current": None, "wallpapers": {}, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*",
-            "scaling": {}, "auto_theme": False, "rotation": False, "interval": 30, "order": "random", "seq_index": 0}
+            "scaling": {}, "auto_theme": False, "rotation": False, "interval": 30, "order": "random",
+            "seq_index": 0, "last_output_idx": 0, "last_scaling_idx": 0}
 
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -94,11 +95,11 @@ def kill_mpvpaper(output=None):
         _mpvpaper_pids.clear()
 
 def _mpvpaper_cmd(output, path, scaling="fit"):
-    opts = "loop-file=inf --no-audio"
+    opts = "loop-file=inf --no-audio --gpu-context=wayland"
     if scaling == "fill":
-        opts += " --video-fit=fill"
+        opts += " --panscan=1.0"
     elif scaling == "stretch":
-        opts += " --video-fit=stretch"
+        opts += " --video-aspect-override=0"
     if Path("/app/bin/mpvpaper").exists():
         return ["flatpak-spawn", "--host", "mpvpaper", "-o", opts, output, path]
     return ["mpvpaper", "-o", opts, output, path]
@@ -144,9 +145,15 @@ def apply_wallpaper(path: str, output: str, scaling="fit"):
     with log_file.open("a") as f:
         f.write(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
+        err_path = CONFIG_DIR / f"mpvpaper_{output}.log"
+        err_fd = open(err_path, "a")
         proc = subprocess.Popen(
-            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err_fd,
         )
+        def _cleanup(p=proc, fd=err_fd):
+            p.wait()
+            fd.close()
+        threading.Thread(target=_cleanup, daemon=True).start()
     except Exception as e:
         msg = f"failed to start mpvpaper: {e}"
         ts = datetime.now().isoformat()
@@ -161,25 +168,37 @@ def apply_wallpaper(path: str, output: str, scaling="fit"):
 
     return proc, None
 
-def write_autostart(wallpapers: dict, scaling: dict):
-    if IN_FLATPAK:
-        return
-    AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "[Desktop Entry]",
-        "Type=Application",
-        "Name=Papyrus",
-    ]
+def write_autostart_script(wallpapers: dict, scaling: dict) -> Path:
+    script = CONFIG_DIR / "autostart.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["#!/usr/bin/env bash", "set -e"]
     for output, path in wallpapers.items():
         sc = scaling.get(output, "fit")
         opts = "loop-file=inf --no-audio"
         if sc == "fill":
-            opts += " --video-fit=fill"
+            opts += " --panscan=1.0"
         elif sc == "stretch":
-            opts += " --video-fit=stretch"
-        lines.append(f'Exec=mpvpaper -o "{opts}" {output} {path}')
-    lines.append("X-GNOME-Autostart-enabled=true")
-    AUTOSTART.write_text("\n".join(lines) + "\n")
+            opts += " --video-aspect-override=0"
+        if Path("/app/bin/mpvpaper").exists():
+            lines.append(f'flatpak-spawn --host mpvpaper -o "{opts}" {output} {path} &')
+        else:
+            lines.append(f'mpvpaper -o "{opts}" {output} {path} &')
+    script.write_text("\n".join(lines) + "\n")
+    script.chmod(0o755)
+    return script
+
+def write_autostart(wallpapers: dict, scaling: dict):
+    if IN_FLATPAK or not wallpapers:
+        return
+    script = write_autostart_script(wallpapers, scaling)
+    AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
+    AUTOSTART.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Papyrus\n"
+        f"Exec={script}\n"
+        "X-GNOME-Autostart-enabled=true\n"
+    )
 
 def remove_autostart():
     if IN_FLATPAK:
@@ -856,7 +875,10 @@ class CWApp(Adw.Application):
 
         wallpapers = self.cfg.get("wallpapers", {}) or {}
         if not wallpapers and self.cfg.get("current"):
-            wallpapers[self.cfg.get("output", "*")] = self.cfg["current"]
+            out = self.cfg.get("output", "*")
+            wallpapers[out] = self.cfg["current"]
+            self.cfg["wallpapers"] = wallpapers
+            save_config(self.cfg)
         self._update_footer(wallpapers)
 
         if self.cfg.get("rotation", False):
@@ -1352,7 +1374,8 @@ class CWApp(Adw.Application):
         out_selector.append(out_hdr)
         out_names = ["All Monitors"] + self.outputs
         self._detail_output_dd = Gtk.DropDown.new_from_strings(out_names)
-        self._detail_output_dd.set_selected(0)
+        saved_out = min(self.cfg.get("last_output_idx", 0), len(out_names) - 1)
+        self._detail_output_dd.set_selected(saved_out)
         self._detail_output_dd.set_halign(Gtk.Align.FILL)
         self._detail_output_dd.set_hexpand(True)
         out_selector.append(self._detail_output_dd)
@@ -1365,7 +1388,8 @@ class CWApp(Adw.Application):
         sc_hdr.add_css_class("status-label")
         sc_selector.append(sc_hdr)
         self._detail_scaling_dd = Gtk.DropDown.new_from_strings(["Fit", "Fill", "Stretch"])
-        self._detail_scaling_dd.set_selected(0)
+        saved_sc = min(self.cfg.get("last_scaling_idx", 0), 2)
+        self._detail_scaling_dd.set_selected(saved_sc)
         self._detail_scaling_dd.set_halign(Gtk.Align.FILL)
         self._detail_scaling_dd.set_hexpand(True)
         sc_selector.append(self._detail_scaling_dd)
@@ -1602,6 +1626,8 @@ class CWApp(Adw.Application):
 
         dd_idx = self._detail_output_dd.get_selected()
         scaling_idx = self._detail_scaling_dd.get_selected()
+        self.cfg["last_output_idx"] = dd_idx
+        self.cfg["last_scaling_idx"] = scaling_idx
         scaling = ["fit", "fill", "stretch"][scaling_idx]
         targets = ["*"] if dd_idx == 0 else [self.outputs[dd_idx - 1]]
 
@@ -1651,8 +1677,6 @@ class CWApp(Adw.Application):
         self.cfg["current"] = None
         self.cfg["wallpapers"] = {}
         save_config(self.cfg)
-        remove_autostart()
-        self.autostart_sw.set_active(False)
         self.banner.set_title("No wallpaper active")
         self._update_footer({})
         self._populate()
