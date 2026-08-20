@@ -78,6 +78,32 @@ def save_config(cfg):
 
 _mpvpaper_pids = {}  # output → pid
 
+def discover_mpvpaper_pids():
+    """Re-register mpvpaper PIDs (and their output→path mapping) after app restart."""
+    global _mpvpaper_pids
+    _mpvpaper_pids = {}
+    running = {}
+    for pid_dir in os.listdir("/proc"):
+        if not pid_dir.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid_dir}/cmdline", "rb") as f:
+                args = f.read().split(b"\0")
+        except OSError:
+            continue
+        if not args or not args[0]:
+            continue
+        name = os.path.basename(args[0].decode(errors="ignore"))
+        if name not in ("mpvpaper", "mpvpaper-holder"):
+            continue
+        decoded = [a.decode(errors="ignore") for a in args if a]
+        if len(decoded) >= 3:
+            output = decoded[-2]
+            path = decoded[-1]
+            _mpvpaper_pids[output] = int(pid_dir)
+            running[output] = path
+    return running
+
 def kill_mpvpaper(output=None):
     if output:
         pid = _mpvpaper_pids.pop(output, None)
@@ -93,13 +119,24 @@ def kill_mpvpaper(output=None):
             except ProcessLookupError:
                 pass
         _mpvpaper_pids.clear()
+        # Also kill any mpvpaper started before this app session (e.g. from
+        # a previous launch) so "Stop" always stops every wallpaper.
+        try:
+            if Path("/app/bin/mpvpaper").exists():
+                subprocess.run(["flatpak-spawn", "--host", "pkill", "-x", "mpvpaper"],
+                               check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(["pkill", "-x", "mpvpaper"],
+                               check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
 def _mpvpaper_cmd(output, path, scaling="fit"):
-    opts = "loop-file=inf --no-audio --gpu-context=wayland"
+    opts = "loop-file=inf --no-audio"
     if scaling == "fill":
         opts += " --panscan=1.0"
     elif scaling == "stretch":
-        opts += " --video-aspect-override=0"
+        opts += " --no-keepaspect"
     if Path("/app/bin/mpvpaper").exists():
         return ["flatpak-spawn", "--host", "mpvpaper", "-o", opts, output, path]
     return ["mpvpaper", "-o", opts, output, path]
@@ -178,7 +215,7 @@ def write_autostart_script(wallpapers: dict, scaling: dict) -> Path:
         if sc == "fill":
             opts += " --panscan=1.0"
         elif sc == "stretch":
-            opts += " --video-aspect-override=0"
+            opts += " --no-keepaspect"
         if Path("/app/bin/mpvpaper").exists():
             lines.append(f'flatpak-spawn --host mpvpaper -o "{opts}" {output} {path} &')
         else:
@@ -874,7 +911,16 @@ class CWApp(Adw.Application):
         self._populate()
 
         wallpapers = self.cfg.get("wallpapers", {}) or {}
-        if not wallpapers and self.cfg.get("current"):
+        running = discover_mpvpaper_pids()
+        if running:
+            self.cfg["wallpapers"] = running
+            for out, path in running.items():
+                sc_map = self.cfg.setdefault("scaling", {})
+                sc_map.setdefault(out, "fit")
+            self.cfg.setdefault("current", None)
+            save_config(self.cfg)
+            wallpapers = running
+        elif not wallpapers and self.cfg.get("current"):
             out = self.cfg.get("output", "*")
             wallpapers[out] = self.cfg["current"]
             self.cfg["wallpapers"] = wallpapers
