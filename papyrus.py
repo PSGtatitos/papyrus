@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.5-2"
+VERSION      = "1.2.5-3"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -566,7 +566,6 @@ CSS = """
 /* Cards */
 .wallpaper-card {
     border-radius: 12px;
-    overflow: hidden;
     border: 1px solid @outline-variant;
     transition: all 300ms ease;
 }
@@ -581,7 +580,6 @@ CSS = """
 }
 .card-thumb {
     border-radius: 12px;
-    overflow: hidden;
     transition: transform 500ms ease;
 }
 .card-play-overlay {
@@ -862,7 +860,12 @@ class CWApp(Adw.Application):
             display = Gdk.Display.get_default()
             if display is None:
                 return
-            theme = Gtk.IconTheme.get_for_display(display)
+            # Note: get_for_display() returns the display's *singleton* theme,
+            # whose name cannot be changed (gtk_icon_theme_set_theme_name
+            # aborts with an assertion on some GTK4 builds). To switch themes we
+            # must build a fresh Gtk.IconTheme and assign it via
+            # set_for_display().
+            old_theme = Gtk.IconTheme.get_for_display(display)
             desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
             cosmic = ("COSMIC" in desktop.upper()) or ("POP" in desktop.upper()) \
                      or (_Path.home() / ".config" / "cosmic").exists()
@@ -873,12 +876,21 @@ class CWApp(Adw.Application):
                 "folder-open-symbolic", "video-x-generic",
                 "go-previous-symbolic", "user-trash-symbolic",
             ]
-            missing = [n for n in needed if not theme.has_icon(n)]
+            missing = [n for n in needed if not old_theme.has_icon(n)]
             force = cosmic or bool(missing)
-            before = theme.get_theme_name()
+            before = old_theme.get_theme_name()
+            after = before
             if force:
-                theme.set_theme_name("Adwaita")
-            after = theme.get_theme_name()
+                new_theme = Gtk.IconTheme()
+                new_theme.set_theme_name("Adwaita")
+                if hasattr(Gtk.IconTheme, "set_for_display"):
+                    # GTK 4.12+: the display theme is a singleton that cannot be
+                    # renamed, so assign a freshly built theme instead.
+                    Gtk.IconTheme.set_for_display(display, new_theme)
+                else:
+                    # Older GTK4: the display theme can be renamed directly.
+                    old_theme.set_theme_name("Adwaita")
+                after = "Adwaita"
             try:
                 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
                 with (CONFIG_DIR / "papyrus.log").open("a") as f:
@@ -919,8 +931,7 @@ class CWApp(Adw.Application):
         self.add_btn.set_child(Gtk.Image.new_from_gicon(
             Gio.ThemedIcon.new_from_names(
                 ["folder-open-symbolic", "folder-symbolic", "list-add-symbolic",
-                 "document-open-symbolic"]),
-            Gtk.IconSize.NORMAL))
+                 "document-open-symbolic"])))
         self.add_btn.connect("clicked", self._add_folder)
         self.header.pack_start(self.add_btn)
 
