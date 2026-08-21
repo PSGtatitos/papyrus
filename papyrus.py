@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.5"
+VERSION      = "1.2.5-1"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -846,16 +846,20 @@ class CWApp(Adw.Application):
         self._rotation_source = None
 
     def _ensure_icon_theme(self):
-        # Some environments (e.g. COSMIC Epoch 1.6.0) ship an icon theme that
-        # does not include the Adwaita symbolic icons Papyrus relies on, so the
-        # sidebar/toolbar icons render blank. Fall back to Adwaita, which always
-        # ships them, only when the active theme is missing any of them.
+        # COSMIC (and some DEs) can report having the Adwaita symbolic icons
+        # via has_icon() but fail to actually render them, leaving the
+        # sidebar/toolbar icons blank. has_icon() is therefore unreliable, so we
+        # force the Adwaita theme (which always ships these icons) when running
+        # under COSMIC, or when the active theme is genuinely missing any of
+        # them. Diagnostics are written to ~/.config/papyrus/papyrus.log.
         try:
             from gi.repository import Gdk
+            import os
             display = Gdk.Display.get_default()
             if display is None:
                 return
             theme = Gtk.IconTheme.get_for_display(display)
+            desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
             needed = [
                 "emblem-photos-symbolic", "preferences-system-symbolic",
                 "help-browser-symbolic", "media-playback-stop-symbolic",
@@ -863,10 +867,28 @@ class CWApp(Adw.Application):
                 "folder-open-symbolic", "video-x-generic",
                 "go-previous-symbolic", "user-trash-symbolic",
             ]
-            if not all(theme.has_icon(n) for n in needed):
+            missing = [n for n in needed if not theme.has_icon(n)]
+            force = ("COSMIC" in desktop.upper()) or bool(missing)
+            before = theme.get_theme_name()
+            if force:
                 theme.set_theme_name("Adwaita")
-        except Exception:
-            pass
+            after = theme.get_theme_name()
+            try:
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                with (CONFIG_DIR / "papyrus.log").open("a") as f:
+                    f.write(
+                        f"[icon-theme] desktop={desktop!r} before={before!r} "
+                        f"after={after!r} missing={missing}\n"
+                    )
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                with (CONFIG_DIR / "papyrus.log").open("a") as f:
+                    f.write(f"[icon-theme] error: {e}\n")
+            except Exception:
+                pass
 
     def _activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
@@ -1019,10 +1041,16 @@ class CWApp(Adw.Application):
 
     def _make_nav_row(self, page_name, label_text):
         box = Gtk.Box(spacing=12)
-        icon_name = "emblem-photos-symbolic" if page_name == "library" else \
-                    "preferences-system-symbolic" if page_name == "settings" else \
-                    "help-browser-symbolic"
-        icon = Gtk.Image.new_from_icon_name(icon_name)
+        fallbacks = {
+            "library": ["emblem-photos-symbolic", "folder-pictures-symbolic",
+                        "image-x-generic"],
+            "settings": ["preferences-system-symbolic", "applications-system-symbolic",
+                         "preferences-desktop-symbolic"],
+            "help": ["help-browser-symbolic", "help-about-symbolic",
+                     "dialog-question"],
+        }
+        icon = Gtk.Image()
+        icon.set_from_gicon(Gio.ThemedIcon.new_from_names(fallbacks.get(page_name, [])))
         icon.set_pixel_size(20)
         icon.add_css_class("nav-icon")
         box.append(icon)
