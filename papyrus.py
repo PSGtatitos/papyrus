@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.5-1"
+VERSION      = "1.2.5-2"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -846,20 +846,26 @@ class CWApp(Adw.Application):
         self._rotation_source = None
 
     def _ensure_icon_theme(self):
-        # COSMIC (and some DEs) can report having the Adwaita symbolic icons
-        # via has_icon() but fail to actually render them, leaving the
-        # sidebar/toolbar icons blank. has_icon() is therefore unreliable, so we
-        # force the Adwaita theme (which always ships these icons) when running
-        # under COSMIC, or when the active theme is genuinely missing any of
-        # them. Diagnostics are written to ~/.config/papyrus/papyrus.log.
+        # COSMIC / Pop!_OS ship an icon theme that reports having the Adwaita
+        # symbolic icons via has_icon() but fails to actually render some of
+        # them (e.g. preferences-system-symbolic, folder-open-symbolic), so the
+        # Settings nav icon and the Add Folder button stay blank. has_icon() is
+        # therefore unreliable. We force the Adwaita theme (which always ships
+        # every icon Papyrus uses) whenever we detect COSMIC — via
+        # XDG_CURRENT_DESKTOP, or the presence of ~/.config/cosmic — or when the
+        # active theme is genuinely missing any of them. Diagnostics are written
+        # to ~/.config/papyrus/papyrus.log.
         try:
             from gi.repository import Gdk
             import os
+            from pathlib import Path as _Path
             display = Gdk.Display.get_default()
             if display is None:
                 return
             theme = Gtk.IconTheme.get_for_display(display)
             desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+            cosmic = ("COSMIC" in desktop.upper()) or ("POP" in desktop.upper()) \
+                     or (_Path.home() / ".config" / "cosmic").exists()
             needed = [
                 "emblem-photos-symbolic", "preferences-system-symbolic",
                 "help-browser-symbolic", "media-playback-stop-symbolic",
@@ -868,7 +874,7 @@ class CWApp(Adw.Application):
                 "go-previous-symbolic", "user-trash-symbolic",
             ]
             missing = [n for n in needed if not theme.has_icon(n)]
-            force = ("COSMIC" in desktop.upper()) or bool(missing)
+            force = cosmic or bool(missing)
             before = theme.get_theme_name()
             if force:
                 theme.set_theme_name("Adwaita")
@@ -909,7 +915,12 @@ class CWApp(Adw.Application):
         self.header.set_title_widget(self.header_title)
         self.win.set_titlebar(self.header)
 
-        self.add_btn = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Add folder")
+        self.add_btn = Gtk.Button(tooltip_text="Add folder")
+        self.add_btn.set_child(Gtk.Image.new_from_gicon(
+            Gio.ThemedIcon.new_from_names(
+                ["folder-open-symbolic", "folder-symbolic", "list-add-symbolic",
+                 "document-open-symbolic"]),
+            Gtk.IconSize.NORMAL))
         self.add_btn.connect("clicked", self._add_folder)
         self.header.pack_start(self.add_btn)
 
