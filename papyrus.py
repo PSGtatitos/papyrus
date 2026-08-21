@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.4"
+VERSION      = "1.2.5"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -845,8 +845,32 @@ class CWApp(Adw.Application):
         self._current_page = "library"
         self._rotation_source = None
 
+    def _ensure_icon_theme(self):
+        # Some environments (e.g. COSMIC Epoch 1.6.0) ship an icon theme that
+        # does not include the Adwaita symbolic icons Papyrus relies on, so the
+        # sidebar/toolbar icons render blank. Fall back to Adwaita, which always
+        # ships them, only when the active theme is missing any of them.
+        try:
+            from gi.repository import Gdk
+            display = Gdk.Display.get_default()
+            if display is None:
+                return
+            theme = Gtk.IconTheme.get_for_display(display)
+            needed = [
+                "emblem-photos-symbolic", "preferences-system-symbolic",
+                "help-browser-symbolic", "media-playback-stop-symbolic",
+                "media-playback-start-symbolic", "folder-symbolic",
+                "folder-open-symbolic", "video-x-generic",
+                "go-previous-symbolic", "user-trash-symbolic",
+            ]
+            if not all(theme.has_icon(n) for n in needed):
+                theme.set_theme_name("Adwaita")
+        except Exception:
+            pass
+
     def _activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        self._ensure_icon_theme()
         self.win = Gtk.ApplicationWindow(application=app)
         self.win.set_default_size(960, 640)
 
