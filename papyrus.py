@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.5-3"
+VERSION      = "1.2.5-4"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -877,7 +877,12 @@ class CWApp(Adw.Application):
                 "go-previous-symbolic", "user-trash-symbolic",
             ]
             missing = [n for n in needed if not old_theme.has_icon(n)]
-            force = cosmic or bool(missing)
+            # Always fall back to Adwaita: it ships every icon Papyrus uses, and
+            # several environments (COSMIC/Pop) report these icons as present via
+            # has_icon() yet fail to render them. On GNOME the theme is already
+            # Adwaita, so this is a no-op there. Detection above is only kept for
+            # diagnostics now.
+            force = True
             before = old_theme.get_theme_name()
             after = before
             if force:
@@ -890,6 +895,13 @@ class CWApp(Adw.Application):
                 else:
                     # Older GTK4: the display theme can be renamed directly.
                     old_theme.set_theme_name("Adwaita")
+                # Extra insurance for GTK4 builds where the above doesn't stick:
+                # also set the global icon-theme-name setting.
+                try:
+                    Gtk.Settings.get_default().set_property(
+                        "gtk-icon-theme-name", "Adwaita")
+                except Exception:
+                    pass
                 after = "Adwaita"
             try:
                 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
