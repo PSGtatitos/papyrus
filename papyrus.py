@@ -15,6 +15,7 @@ from gi.repository import Gtk, Adw, Gio, GLib, Gdk
 
 import subprocess
 import json
+import shlex
 import shutil
 import threading
 import signal
@@ -91,15 +92,23 @@ def discover_mpvpaper_pids():
                 args = f.read().split(b"\0")
         except OSError:
             continue
-        if not args or not args[0]:
-            continue
-        name = os.path.basename(args[0].decode(errors="ignore"))
-        if name not in ("mpvpaper", "mpvpaper-holder"):
-            continue
         decoded = [a.decode(errors="ignore") for a in args if a]
-        if len(decoded) >= 3:
-            output = decoded[-2]
-            path = decoded[-1]
+        if not decoded:
+            continue
+        # mpvpaper can be launched directly or, in Flatpak, through
+        # `flatpak-spawn --host mpvpaper ...`. Find the mpvpaper token instead
+        # of trusting argv[0], so running wallpapers are still tracked/stopped
+        # after the app restarts or was started by the store/portal.
+        try:
+            mpv_idx = next(i for i, a in enumerate(decoded)
+                           if os.path.basename(a) in ("mpvpaper", "mpvpaper-holder"))
+        except StopIteration:
+            continue
+        tail = decoded[mpv_idx + 1:]
+        # Expected shape: ["-o", "<opts>", "<output>", "<path>"] (opts optional).
+        if len(tail) >= 3:
+            output = tail[-2]
+            path = tail[-1]
             _mpvpaper_pids[output] = int(pid_dir)
             running[output] = path
     return running
@@ -132,7 +141,11 @@ def kill_mpvpaper(output=None):
             pass
 
 def _mpvpaper_cmd(output, path, scaling="fit"):
-    opts = "loop-file=inf --no-audio"
+    # --no-config: mpvpaper renders a wallpaper, not a regular player window.
+    # A user's ~/.config/mpv/mpv.conf can otherwise cause a black/blank image
+    # (e.g. a broken vo, custom hwdec, or odd shaders). Command-line options
+    # (loop-file=inf, --no-audio, scaling) still apply.
+    opts = "loop-file=inf --no-audio --no-config"
     if scaling == "fill":
         opts += " --panscan=1.0"
     elif scaling == "stretch":
@@ -211,15 +224,20 @@ def write_autostart_script(wallpapers: dict, scaling: dict) -> Path:
     lines = ["#!/usr/bin/env bash", "set -e"]
     for output, path in wallpapers.items():
         sc = scaling.get(output, "fit")
-        opts = "loop-file=inf --no-audio"
+        opts = "loop-file=inf --no-audio --no-config"
         if sc == "fill":
             opts += " --panscan=1.0"
         elif sc == "stretch":
             opts += " --no-keepaspect"
+        # Quote both output and path. "All Monitors" uses output "*", which
+        # shell glob expansion (notably on zsh) would otherwise turn into a
+        # (non-existing) filename and break the command.
+        out_q = shlex.quote(str(output))
+        path_q = shlex.quote(str(path))
         if Path("/app/bin/mpvpaper").exists():
-            lines.append(f'flatpak-spawn --host mpvpaper -o "{opts}" {output} {path} &')
+            lines.append(f'flatpak-spawn --host mpvpaper -o "{opts}" {out_q} {path_q} &')
         else:
-            lines.append(f'mpvpaper -o "{opts}" {output} {path} &')
+            lines.append(f'mpvpaper -o "{opts}" {out_q} {path_q} &')
     script.write_text("\n".join(lines) + "\n")
     script.chmod(0o755)
     return script
@@ -1506,7 +1524,17 @@ class CWApp(Adw.Application):
         out_selector.append(out_hdr)
         out_names = ["All Monitors"] + self.outputs
         self._detail_output_dd = Gtk.DropDown.new_from_strings(out_names)
-        saved_out = min(self.cfg.get("last_output_idx", 0), len(out_names) - 1)
+        wallpapers = self.cfg.get("wallpapers", {}) or {}
+        active_outs = [o for o, w in wallpapers.items() if w == str(path_obj)]
+        if active_outs:
+            out = active_outs[0]
+            saved_out = 0 if out == "*" else (out_names.index(out) if out in out_names else 0)
+            scaling_map = self.cfg.get("scaling", {}) or {}
+            out_sc = scaling_map.get(out, "fit")
+            saved_sc = ["fit", "fill", "stretch"].index(out_sc) if out_sc in ("fit", "fill", "stretch") else 0
+        else:
+            saved_out = min(self.cfg.get("last_output_idx", 0), len(out_names) - 1)
+            saved_sc = min(self.cfg.get("last_scaling_idx", 0), 2)
         self._detail_output_dd.set_selected(saved_out)
         self._detail_output_dd.set_halign(Gtk.Align.FILL)
         self._detail_output_dd.set_hexpand(True)
@@ -1520,7 +1548,6 @@ class CWApp(Adw.Application):
         sc_hdr.add_css_class("status-label")
         sc_selector.append(sc_hdr)
         self._detail_scaling_dd = Gtk.DropDown.new_from_strings(["Fit", "Fill", "Stretch"])
-        saved_sc = min(self.cfg.get("last_scaling_idx", 0), 2)
         self._detail_scaling_dd.set_selected(saved_sc)
         self._detail_scaling_dd.set_halign(Gtk.Align.FILL)
         self._detail_scaling_dd.set_hexpand(True)
@@ -1783,10 +1810,22 @@ class CWApp(Adw.Application):
             else:
                 last_status = f"Active: {Path(path).name}"
 
-            def monitor(p=proc):
-                if p.poll() is not None and p.returncode != 0:
+            def monitor(p=proc, out=output):
+                err_log = CONFIG_DIR / f"mpvpaper_{out}.log"
+                # Some mpvpaper failures exit within the first second or two.
+                try:
+                    rc = p.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    rc = None
+                if rc is not None and rc != 0:
+                    tail = ""
+                    try:
+                        if err_log.exists():
+                            tail = " — " + err_log.read_text(errors="ignore").splitlines()[-1].strip()
+                    except Exception:
+                        pass
                     GLib.idle_add(lambda: self.banner.set_title(
-                        f"mpvpaper crashed (code {p.returncode})"))
+                        f"mpvpaper failed (code {rc}){tail}"))
             threading.Thread(target=monitor, daemon=True).start()
 
         self.cfg["current"] = path
