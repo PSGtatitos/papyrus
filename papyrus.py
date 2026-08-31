@@ -187,6 +187,11 @@ def detect_outputs():
     return ["*"]
 
 def apply_wallpaper(path: str, output: str, scaling="fit"):
+    # Re-discover first: the existing wallpaper may have been launched by the
+    # login autostart script or a previous Papyrus session, not this process.
+    # Registering it here lets kill_mpvpaper() replace it instead of creating a
+    # second mpvpaper instance for the same output.
+    discover_mpvpaper_pids()
     kill_mpvpaper(output)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = CONFIG_DIR / "mpvpaper.log"
@@ -235,9 +240,9 @@ def write_autostart_script(wallpapers: dict, scaling: dict) -> Path:
         out_q = shlex.quote(str(output))
         path_q = shlex.quote(str(path))
         if Path("/app/bin/mpvpaper").exists():
-            lines.append(f'flatpak-spawn --host mpvpaper -o "{opts}" {out_q} {path_q} &')
+            lines.append(f'flatpak-spawn --host mpvpaper --fork -o "{opts}" {out_q} {path_q}')
         else:
-            lines.append(f'mpvpaper -o "{opts}" {out_q} {path_q} &')
+            lines.append(f'mpvpaper --fork -o "{opts}" {out_q} {path_q}')
     script.write_text("\n".join(lines) + "\n")
     script.chmod(0o755)
     return script
