@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.8"
+VERSION      = "1.2.9"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -1782,6 +1782,16 @@ class CWApp(Adw.Application):
             parts.append(f"{lbl}: {name}")
         self.monitor_lbl.set_label(" | ".join(parts))
 
+    def _active_status(self, wallpapers):
+        """Return a banner label that includes every active output."""
+        if not wallpapers:
+            return "No wallpaper active"
+        parts = []
+        for output, path in wallpapers.items():
+            label = "All monitors" if output == "*" else output
+            parts.append(f"{label}: {Path(path).name}")
+        return "Active: " + " | ".join(parts)
+
     def _update_header_info(self, text):
         pass
 
@@ -1795,7 +1805,7 @@ class CWApp(Adw.Application):
         scaling = ["fit", "fill", "stretch"][scaling_idx]
         targets = ["*"] if dd_idx == 0 else [self.outputs[dd_idx - 1]]
 
-        last_status = ""
+        theme_status = ""
         for output in targets:
             proc, err = apply_wallpaper(path, output, scaling)
             if err:
@@ -1811,9 +1821,7 @@ class CWApp(Adw.Application):
             thumb = get_thumb(Path(path))
             if self.cfg.get("auto_theme", False) and thumb.exists():
                 ok = apply_cosmic_theme(thumb, self.cfg.get("auto_dark", True))
-                last_status = f"Active: {Path(path).name}" + (" · theme applied" if ok else " · theme failed")
-            else:
-                last_status = f"Active: {Path(path).name}"
+                theme_status = " · theme applied" if ok else " · theme failed"
 
             def monitor(p=proc, out=output):
                 err_log = CONFIG_DIR / f"mpvpaper_{out}.log"
@@ -1835,7 +1843,7 @@ class CWApp(Adw.Application):
 
         self.cfg["current"] = path
         save_config(self.cfg)
-        self.banner.set_title(last_status)
+        self.banner.set_title(self._active_status(self.cfg.get("wallpapers", {})) + theme_status)
 
         if self.autostart_sw.get_active():
             write_autostart(self.cfg.get("wallpapers", {}), self.cfg.get("scaling", {}))
