@@ -1160,8 +1160,6 @@ class CWApp(Adw.Application):
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
-        page.set_halign(Gtk.Align.CENTER)
-        page.set_size_request(720, -1)
 
         # General section
         gen_title = Gtk.Label(label="General")
@@ -1361,7 +1359,9 @@ class CWApp(Adw.Application):
         add_folder_btn.connect("clicked", self._add_folder)
         page.append(add_folder_btn)
 
-        scroll.set_child(page)
+        clamp = Adw.Clamp(maximum_size=720)
+        clamp.set_child(page)
+        scroll.set_child(clamp)
         outer.append(scroll)
 
         return outer
