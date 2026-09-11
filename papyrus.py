@@ -1474,9 +1474,8 @@ class CWApp(Adw.Application):
         pic.set_content_fit(Gtk.ContentFit.CONTAIN)
         pic.set_hexpand(True)
         pic.set_vexpand(True)
-        pic_clamp = Adw.Clamp(maximum_size=500)
-        pic_clamp.set_child(pic)
-        preview_box.append(pic_clamp)
+        pic.set_valign(Gtk.Align.START)
+        preview_box.append(pic)
         card.append(preview_box)
 
         # Sidebar
