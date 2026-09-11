@@ -1462,7 +1462,6 @@ class CWApp(Adw.Application):
         content.set_halign(Gtk.Align.CENTER)
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        card.set_size_request(800, -1)
         card.add_css_class("detail-card")
 
         # Preview area
@@ -1472,9 +1471,12 @@ class CWApp(Adw.Application):
 
         thumb_path = get_thumb_large(path_obj)
         pic = Gtk.Picture.new_for_filename(str(thumb_path)) if thumb_path.exists() else Gtk.Picture()
-        pic.set_content_fit(Gtk.ContentFit.COVER)
-        pic.set_size_request(500, 350)
-        preview_box.append(pic)
+        pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+        pic.set_hexpand(True)
+        pic.set_vexpand(True)
+        pic_clamp = Adw.Clamp(maximum_size=500)
+        pic_clamp.set_child(pic)
+        preview_box.append(pic_clamp)
         card.append(preview_box)
 
         # Sidebar
