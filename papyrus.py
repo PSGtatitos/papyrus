@@ -1374,8 +1374,6 @@ class CWApp(Adw.Application):
 
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
                        margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
-        page.set_halign(Gtk.Align.CENTER)
-        page.set_size_request(600, -1)
 
         info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         info_box.add_css_class("settings-row")
@@ -1409,7 +1407,9 @@ class CWApp(Adw.Application):
 
         page.append(links_box)
 
-        scroll.set_child(page)
+        clamp = Adw.Clamp(maximum_size=600)
+        clamp.set_child(page)
+        scroll.set_child(clamp)
         outer.append(scroll)
         return outer
 
