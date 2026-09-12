@@ -1160,8 +1160,6 @@ class CWApp(Adw.Application):
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
-        page.set_halign(Gtk.Align.CENTER)
-        page.set_size_request(720, -1)
 
         # General section
         gen_title = Gtk.Label(label="General")
@@ -1361,7 +1359,9 @@ class CWApp(Adw.Application):
         add_folder_btn.connect("clicked", self._add_folder)
         page.append(add_folder_btn)
 
-        scroll.set_child(page)
+        clamp = Adw.Clamp(maximum_size=720)
+        clamp.set_child(page)
+        scroll.set_child(clamp)
         outer.append(scroll)
 
         return outer
@@ -1374,8 +1374,6 @@ class CWApp(Adw.Application):
 
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
                        margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
-        page.set_halign(Gtk.Align.CENTER)
-        page.set_size_request(600, -1)
 
         info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         info_box.add_css_class("settings-row")
@@ -1409,7 +1407,9 @@ class CWApp(Adw.Application):
 
         page.append(links_box)
 
-        scroll.set_child(page)
+        clamp = Adw.Clamp(maximum_size=600)
+        clamp.set_child(page)
+        scroll.set_child(clamp)
         outer.append(scroll)
         return outer
 
@@ -1462,7 +1462,6 @@ class CWApp(Adw.Application):
         content.set_halign(Gtk.Align.CENTER)
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        card.set_size_request(800, -1)
         card.add_css_class("detail-card")
 
         # Preview area
@@ -1472,8 +1471,10 @@ class CWApp(Adw.Application):
 
         thumb_path = get_thumb_large(path_obj)
         pic = Gtk.Picture.new_for_filename(str(thumb_path)) if thumb_path.exists() else Gtk.Picture()
-        pic.set_content_fit(Gtk.ContentFit.COVER)
-        pic.set_size_request(500, 350)
+        pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+        pic.set_hexpand(True)
+        pic.set_vexpand(True)
+        pic.set_valign(Gtk.Align.START)
         preview_box.append(pic)
         card.append(preview_box)
 
