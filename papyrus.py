@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.2.11"
+VERSION      = "1.2.12"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -56,6 +56,8 @@ CONFIG_FILE   = CONFIG_DIR / "config.json"
 AUTOSTART     = Path.home() / ".config" / "autostart" / "papyrus.desktop"
 DEFAULT_DIRS  = [Path.home() / "Wallpapers" / "Papyrus", Path.home() / "Downloads", Path.home() / "Videos", Path.home() / "Pictures"]
 VIDEO_EXTS    = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
+IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+WALLPAPER_EXTS = VIDEO_EXTS | IMAGE_EXTS
 
 COSMIC_DARK   = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark/v1"
 COSMIC_LIGHT  = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light/v1"
@@ -378,20 +380,36 @@ def apply_cosmic_theme(thumb_path, auto_dark=True):
 
     return True
 
-def scan_videos(dirs):
-    videos = []
+def scan_wallpapers(dirs):
+    wallpapers = []
     for d in dirs:
         p = Path(d)
         if p.exists():
             for f in sorted(p.iterdir()):
-                if f.suffix.lower() in VIDEO_EXTS:
-                    videos.append(f)
-    return videos
+                if f.is_file() and f.suffix.lower() in WALLPAPER_EXTS:
+                    wallpapers.append(f)
+    return wallpapers
+
+def _make_image_thumbnail(path: Path, thumb: Path, width: int):
+    """Create an image thumbnail without relying on ffmpeg's still-image handling."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            height = max(1, round(img.height * width / img.width))
+            img.resize((width, height), Image.Resampling.LANCZOS).save(thumb, "JPEG")
+        return True
+    except Exception as e:
+        print(f"[papyrus] image thumbnail failed for {path}: {e}")
+        return False
 
 def get_thumb(path: Path) -> Path:
     thumb = CONFIG_DIR / "thumbs" / (path.stem[:80] + ".jpg")
     if not thumb.exists():
         thumb.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() in IMAGE_EXTS:
+            _make_image_thumbnail(path, thumb, 160)
+            return thumb
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(path), "-ss", "00:00:01",
              "-vframes", "1", "-vf", "scale=160:-1", str(thumb)],
@@ -403,6 +421,9 @@ def get_thumb_large(path: Path) -> Path:
     thumb = CONFIG_DIR / "thumbs" / (path.stem[:80] + "_large.jpg")
     if not thumb.exists():
         thumb.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() in IMAGE_EXTS:
+            _make_image_thumbnail(path, thumb, 640)
+            return thumb
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(path), "-ss", "00:00:01",
              "-vframes", "1", "-vf", "scale=640:-1", str(thumb)],
@@ -1488,7 +1509,8 @@ class CWApp(Adw.Application):
         name_lbl.add_css_class("window-title")
         sidebar.append(name_lbl)
 
-        subtitle_lbl = Gtk.Label(label="Animated Video Wallpaper", xalign=0)
+        kind = "Animated Video Wallpaper" if path_obj.suffix.lower() in VIDEO_EXTS else "Static Image Wallpaper"
+        subtitle_lbl = Gtk.Label(label=kind, xalign=0)
         subtitle_lbl.add_css_class("control-label")
         sidebar.append(subtitle_lbl)
 
@@ -1596,8 +1618,8 @@ class CWApp(Adw.Application):
             self.add_btn.set_visible(True)
             self.stop_btn.set_visible(True)
             self.back_btn.set_visible(False)
-            videos = scan_videos(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
-            self.header_title.set_subtitle(f"{len(videos)} items found")
+            wallpapers = scan_wallpapers(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
+            self.header_title.set_subtitle(f"{len(wallpapers)} items found")
         elif page == "settings":
             self.header_title.set_title("Settings")
             self.header_title.set_subtitle("")
@@ -1633,14 +1655,14 @@ class CWApp(Adw.Application):
 
         self._refresh_folder_list()
 
-        videos = scan_videos(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
+        wallpapers_found = scan_wallpapers(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
         wallpapers = self.cfg.get("wallpapers", {}) or {}
         current = self.cfg.get("current")
         active_paths = set(wallpapers.values())
 
-        self.header_title.set_subtitle(f"{len(videos)} items found")
+        self.header_title.set_subtitle(f"{len(wallpapers_found)} items found")
 
-        if not videos:
+        if not wallpapers_found:
             empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
                                 margin_top=80)
             empty_box.set_halign(Gtk.Align.CENTER)
@@ -1649,7 +1671,7 @@ class CWApp(Adw.Application):
             icon.set_pixel_size(48)
             empty_box.append(icon)
             lbl = Gtk.Label(
-                label="No video files found.\nClick the folder button above to add a folder.",
+                label="No wallpaper files found.\nClick the folder button above to add a folder.",
                 justify=Gtk.Justification.CENTER,
             )
             lbl.add_css_class("control-label")
@@ -1657,8 +1679,8 @@ class CWApp(Adw.Application):
             self.flow.append(empty_box)
             return
 
-        for v in videos:
-            self.flow.append(self._make_card(v, active=str(v) in active_paths))
+        for wallpaper in wallpapers_found:
+            self.flow.append(self._make_card(wallpaper, active=str(wallpaper) in active_paths))
 
     def _refresh_folder_list(self):
         while child := self.folder_list_box.get_first_child():
@@ -1683,7 +1705,8 @@ class CWApp(Adw.Application):
             path_lbl.add_css_class("control-label")
             text_box.append(path_lbl)
 
-            count = len([f for f in Path(d).iterdir() if f.suffix.lower() in VIDEO_EXTS]) if Path(d).exists() else 0
+            count = len([f for f in Path(d).iterdir()
+                         if f.is_file() and f.suffix.lower() in WALLPAPER_EXTS]) if Path(d).exists() else 0
             detail_lbl = Gtk.Label(label=f"{count} items detected", xalign=0)
             detail_lbl.add_css_class("status-label")
             text_box.append(detail_lbl)
@@ -1887,15 +1910,15 @@ class CWApp(Adw.Application):
         self.cfg["output"] = selected
         save_config(self.cfg)
 
-    def _collect_videos(self):
+    def _collect_wallpapers(self):
         dirs = self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS])
-        return sorted(scan_videos(dirs), key=lambda p: str(p))
+        return sorted(scan_wallpapers(dirs), key=lambda p: str(p))
 
     def _rotate_wallpaper(self):
         print(f"[papyrus] rotate tick")
-        videos = self._collect_videos()
-        if not videos:
-            print("[papyrus] rotate: no videos found")
+        wallpapers = self._collect_wallpapers()
+        if not wallpapers:
+            print("[papyrus] rotate: no wallpapers found")
             return True
         order = self.cfg.get("order", "random")
         idx = self.cfg.get("seq_index", 0)
@@ -1903,11 +1926,11 @@ class CWApp(Adw.Application):
         scaling_map = self.cfg.get("scaling", {})
         for output in outputs:
             if order == "random":
-                pick = random.choice(videos)
+                pick = random.choice(wallpapers)
             else:
-                pick = videos[idx % len(videos)]
+                pick = wallpapers[idx % len(wallpapers)]
                 if output == outputs[-1]:
-                    self.cfg["seq_index"] = (idx + 1) % len(videos)
+                    self.cfg["seq_index"] = (idx + 1) % len(wallpapers)
                     save_config(self.cfg)
             print(f"[papyrus] rotate: {pick.name} → {output}")
             proc, err = apply_wallpaper(str(pick), output, scaling_map.get(output, "fit"))
