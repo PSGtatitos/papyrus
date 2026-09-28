@@ -92,7 +92,7 @@ if command -v mpvpaper &>/dev/null; then
 else
     info "Building mpvpaper from source..."
     TMP=$(mktemp -d)
-    git clone --single-branch --depth 1 --branch 1.5 \
+    git clone --single-branch --depth 1 --branch 1.9 \
         https://github.com/GhostNaN/mpvpaper "$TMP/mpvpaper"
     cd "$TMP/mpvpaper"
     CFLAGS="-Wno-error=incompatible-pointer-types" meson setup build
