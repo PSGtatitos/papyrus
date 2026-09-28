@@ -25,7 +25,7 @@ jobs:
 
       - name: Build mpvpaper from source
         run: |
-          git clone --depth 1 --branch 1.5 \
+          git clone --depth 1 --branch 1.9 \
             https://github.com/GhostNaN/mpvpaper.git /tmp/mpvpaper
           cd /tmp/mpvpaper
           CFLAGS="-Wno-error=incompatible-pointer-types" meson setup build
