@@ -16,7 +16,7 @@
 <img width="983" height="636" alt="image" src="https://github.com/user-attachments/assets/cab200e9-4b70-4c3f-975d-5cc839f22711" />
 
 
-Papyrus is a free, open-source animated wallpaper manager for any Wayland desktop. Pick a video, click it, and it becomes your live wallpaper — no accounts, no telemetry, no Wallpaper Engine required.
+Papyrus is a free, open-source wallpaper manager for any Wayland desktop. Pick a video or image, click it, and it becomes your wallpaper — no accounts, no telemetry, no Wallpaper Engine required.
 
 Built primarily for the COSMIC desktop, but it runs on any Wayland compositor (COSMIC, GNOME, Hyprland, Sway, KDE Wayland, OMarchy, and more) because it uses [mpvpaper](https://github.com/GhostNaN/mpvpaper) under the hood.
 
@@ -24,21 +24,21 @@ It also automatically extracts the dominant color from your wallpaper and applie
 
 ## Features
 
-- 🎬 **Animated wallpapers** — supports MP4, WebM, MKV, AVI, MOV
-- 🖥️ **Per-monitor wallpapers** — set different videos on each monitor independently
+- 🎬 **Animated and static wallpapers** — supports MP4, WebM, MKV, AVI, MOV, JPEG, PNG, WebP, and BMP
+- 🖥️ **Per-monitor wallpapers** — set different videos or images on each monitor independently
 - 📐 **Per-monitor scaling** — choose Fit, Fill, or Stretch for each output
 - 🔄 **Playlist rotation** — auto-switch wallpapers at a set interval (random or sequential order)
 - 🎨 **Auto-theme (COSMIC)** — extracts accent color from wallpaper and applies it to your COSMIC theme
 - 🌙 **Auto dark/light mode** — detects wallpaper brightness and switches accordingly
-- 📁 **Folder picker** — choose any folder of video files to scan
-- 🖼️ **Thumbnail previews** — auto-generated from your video files
+- 📁 **Folder picker** — choose any folder of video or image files to scan
+- 🖼️ **Thumbnail previews** — auto-generated from your wallpaper files
 - 🔁 **Start on login** — one toggle to persist your wallpaper across reboots
 - ⬆️ **Self-update** — app checks for updates and can download & install them with one click
 - 🚫 **No telemetry, no accounts, no cloud** — config is a plain JSON file
 
 ## COSMIC Store
 
-Papyrus is available in the [cosmic-flatpak](https://github.com/cosmic-utils/cosmic-flatpak) repository and can be installed directly from the COSMIC Store. You can also install manually.
+> **Flatpak support has ended.** The Papyrus Flatpak in the COSMIC Store is no longer maintained or supported. For supported installations, use the universal installer, the `.deb` package, or the AUR package below.
 
 ## Installation
 
@@ -69,17 +69,12 @@ sudo apt install ./papyrus_*.deb
 ```
 The .deb bundles mpvpaper and includes all dependencies.
 
-COSMIC Store (Flatpak)
-Search for "Papyrus" in the COSMIC Store or run:
-
-```bash
-flatpak install io.github.PSGtatitos.papyrus
-```
+Flatpak builds are no longer supported. Please use one of the supported installation methods above.
 
 ## Updating
 Local install: Run ./update.sh or re-run the installer. The app can also self-update from the banner.
 .deb install: Download the latest .deb from the releases page and reinstall.
-Flatpak: Updated automatically via the COSMIC Store.
+Flatpak: no longer maintained or supported.
 AUR: Updated via your AUR helper (yay -Syu or paru -Syu).
 Usage
 Launch Papyrus from your app launcher or run:
@@ -100,11 +95,11 @@ MotionBGs — 8,000+ wallpapers in 4K
 Wallsflow — growing collection, free
 Pexels Videos — cinematic/nature, 4K
 How it works
-Papyrus uses mpvpaper to render video files as Wayland layer surfaces behind your desktop. When you select a wallpaper, Papyrus:
+Papyrus uses mpvpaper to render video and image files as Wayland layer surfaces behind your desktop. When you select a wallpaper, Papyrus:
 
 Kills any running mpvpaper instance
 Starts mpvpaper with loop enabled on your display output
-Extracts the most vibrant pixel from the video thumbnail
+Extracts the most vibrant pixel from the wallpaper thumbnail
 Writes the color to COSMIC's compiled theme config files (COSMIC only)
 COSMIC picks up the file changes and updates the accent color
 Auto-theming
