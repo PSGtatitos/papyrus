@@ -794,12 +794,13 @@ separator {
     background: alpha(@surface-dim, 0.85);
 }
 .detail-card {
-    background-color: @surface-container-low;
-    border: 1px solid @outline-variant;
+    background-color: alpha(@surface-container-low, 0.72);
+    border: 1px solid alpha(@outline-variant, 0.55);
     border-radius: 12px;
+    box-shadow: 0 12px 32px alpha(black, 0.24);
 }
 .detail-sidebar {
-    background-color: @surface-container;
+    background-color: alpha(@surface-container, 0.48);
 }
 .color-swatch {
     border-radius: 9999px;
@@ -967,8 +968,14 @@ class CWApp(Adw.Application):
     def _activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         self._ensure_icon_theme()
-        self.win = Gtk.ApplicationWindow(application=app)
+        self.win = Adw.ApplicationWindow(application=app)
         self.win.set_default_size(960, 640)
+        self._detail_card = None
+        self._compact_breakpoint = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 760px")
+        )
+        self.win.add_breakpoint(self._compact_breakpoint)
+        self.win.connect("notify::current-breakpoint", self._on_breakpoint_changed)
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_string(CSS)
@@ -1484,7 +1491,8 @@ class CWApp(Adw.Application):
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         card.add_css_class("detail-card")
-
+        self._detail_card = card
+        self._on_breakpoint_changed(self.win, None)
         # Preview area
         preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         preview_box.set_hexpand(True)
@@ -1494,7 +1502,7 @@ class CWApp(Adw.Application):
         pic = Gtk.Picture.new_for_filename(str(thumb_path)) if thumb_path.exists() else Gtk.Picture()
         pic.set_content_fit(Gtk.ContentFit.CONTAIN)
         pic.set_hexpand(True)
-        pic.set_vexpand(True)
+        pic.set_vexpand(False)
         pic.set_valign(Gtk.Align.START)
         preview_box.append(pic)
         card.append(preview_box)
@@ -1611,6 +1619,14 @@ class CWApp(Adw.Application):
         page.append(scroll)
 
         return page
+
+    def _on_breakpoint_changed(self, _window, _param):
+        if self._detail_card is None:
+            return
+        compact = self.win.get_current_breakpoint() == self._compact_breakpoint
+        self._detail_card.set_orientation(
+            Gtk.Orientation.VERTICAL if compact else Gtk.Orientation.HORIZONTAL
+        )
 
     def _update_header_for_page(self, page, detail_name=None):
         if page == "library":
