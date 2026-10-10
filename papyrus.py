@@ -431,6 +431,23 @@ def get_thumb_large(path: Path) -> Path:
         )
     return thumb
 
+def get_thumb_blurred(thumb: Path) -> Path:
+    """Return a cached, blurred copy of a wallpaper thumbnail for the app backdrop."""
+    blurred = thumb.with_name(thumb.stem + "_blur.jpg")
+    try:
+        if not thumb.exists():
+            return thumb
+        if blurred.exists() and blurred.stat().st_mtime >= thumb.stat().st_mtime:
+            return blurred
+        from PIL import Image, ImageFilter
+        with Image.open(thumb) as image:
+            image.convert("RGB").filter(ImageFilter.GaussianBlur(18)).save(
+                blurred, "JPEG", quality=82
+            )
+        return blurred
+    except Exception:
+        return thumb
+
 def get_video_resolution(path: Path) -> str:
     try:
         r = subprocess.run(
@@ -526,7 +543,7 @@ CSS = """
 
 /* Sidebar */
 .sidebar {
-    background-color: @surface-container-low;
+    background-color: alpha(@surface-container-low, 0.68);
     border-right: 1px solid @outline-variant;
     padding: 12px;
 }
@@ -571,8 +588,8 @@ CSS = """
 
 /* Header Bar */
 .top-header {
-    background-color: @surface;
-    border-bottom: 1px solid @outline-variant;
+    background-color: alpha(@surface, 0.68);
+    border-bottom: 1px solid alpha(@outline-variant, 0.55);
     min-height: 48px;
     padding: 0 16px;
 }
@@ -653,7 +670,7 @@ CSS = """
     margin-bottom: 16px;
 }
 .settings-row {
-    background-color: @surface-container;
+    background-color: alpha(@surface-container, 0.72);
     border-radius: 8px;
     border: 1px solid transparent;
     padding: 12px 16px;
@@ -699,8 +716,8 @@ toggle-switch slider {
 
 /* Footer */
 .footer-bar {
-    background-color: @surface;
-    border-top: 1px solid @outline-variant;
+    background-color: alpha(@surface, 0.68);
+    border-top: 1px solid alpha(@outline-variant, 0.55);
     padding: 4px 16px;
 }
 .footer-link {
@@ -736,7 +753,7 @@ scrollbar slider:hover {
 
 /* FlowBox */
 flowbox {
-    background: @surface;
+    background: alpha(@surface, 0.35);
 }
 flowboxchild {
     background: transparent;
@@ -778,7 +795,7 @@ separator {
 
 /* Engine status */
 .engine-status {
-    background-color: @surface-container;
+    background-color: alpha(@surface-container, 0.72);
     border-radius: 12px;
     padding: 16px;
 }
@@ -800,7 +817,7 @@ separator {
     box-shadow: 0 12px 32px alpha(black, 0.24);
 }
 .detail-sidebar {
-    background-color: alpha(@surface-container, 0.48);
+    background-color: alpha(@surface-container, 0.62);
 }
 .color-swatch {
     border-radius: 9999px;
@@ -893,27 +910,20 @@ class CWApp(Adw.Application):
         # symbolic icons via has_icon() but fails to actually render some of
         # them (e.g. preferences-system-symbolic, folder-open-symbolic), so the
         # Settings nav icon and the Add Folder button stay blank. has_icon() is
-        # therefore unreliable. We force the Adwaita theme (which always ships
-        # every icon Papyrus uses) whenever we detect COSMIC — via
-        # XDG_CURRENT_DESKTOP, or the presence of ~/.config/cosmic — or when the
-        # active theme is genuinely missing any of them. Diagnostics are written
-        # to ~/.config/papyrus/papyrus.log.
+        # therefore unreliable. Select Adwaita through Gtk.Settings before
+        # obtaining the display's singleton icon theme; that singleton cannot
+        # be renamed directly. Diagnostics are written to papyrus.log.
         try:
             from gi.repository import Gdk
             import os
-            from pathlib import Path as _Path
             display = Gdk.Display.get_default()
             if display is None:
                 return
-            # Note: get_for_display() returns the display's *singleton* theme,
-            # whose name cannot be changed (gtk_icon_theme_set_theme_name
-            # aborts with an assertion on some GTK4 builds). To switch themes we
-            # must build a fresh Gtk.IconTheme and assign it via
-            # set_for_display().
+            settings = Gtk.Settings.get_for_display(display)
+            before = settings.get_property("gtk-icon-theme-name")
+            settings.set_property("gtk-icon-theme-name", "Adwaita")
             old_theme = Gtk.IconTheme.get_for_display(display)
             desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
-            cosmic = ("COSMIC" in desktop.upper()) or ("POP" in desktop.upper()) \
-                     or (_Path.home() / ".config" / "cosmic").exists()
             needed = [
                 "emblem-photos-symbolic", "preferences-system-symbolic",
                 "help-browser-symbolic", "media-playback-stop-symbolic",
@@ -922,32 +932,7 @@ class CWApp(Adw.Application):
                 "go-previous-symbolic", "user-trash-symbolic",
             ]
             missing = [n for n in needed if not old_theme.has_icon(n)]
-            # Always fall back to Adwaita: it ships every icon Papyrus uses, and
-            # several environments (COSMIC/Pop) report these icons as present via
-            # has_icon() yet fail to render them. On GNOME the theme is already
-            # Adwaita, so this is a no-op there. Detection above is only kept for
-            # diagnostics now.
-            force = True
-            before = old_theme.get_theme_name()
-            after = before
-            if force:
-                new_theme = Gtk.IconTheme()
-                new_theme.set_theme_name("Adwaita")
-                if hasattr(Gtk.IconTheme, "set_for_display"):
-                    # GTK 4.12+: the display theme is a singleton that cannot be
-                    # renamed, so assign a freshly built theme instead.
-                    Gtk.IconTheme.set_for_display(display, new_theme)
-                else:
-                    # Older GTK4: the display theme can be renamed directly.
-                    old_theme.set_theme_name("Adwaita")
-                # Extra insurance for GTK4 builds where the above doesn't stick:
-                # also set the global icon-theme-name setting.
-                try:
-                    Gtk.Settings.get_default().set_property(
-                        "gtk-icon-theme-name", "Adwaita")
-                except Exception:
-                    pass
-                after = "Adwaita"
+            after = settings.get_property("gtk-icon-theme-name")
             try:
                 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
                 with (CONFIG_DIR / "papyrus.log").open("a") as f:
@@ -968,14 +953,8 @@ class CWApp(Adw.Application):
     def _activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         self._ensure_icon_theme()
-        self.win = Adw.ApplicationWindow(application=app)
+        self.win = Gtk.ApplicationWindow(application=app)
         self.win.set_default_size(960, 640)
-        self._detail_card = None
-        self._compact_breakpoint = Adw.Breakpoint.new(
-            Adw.BreakpointCondition.parse("max-width: 760px")
-        )
-        self.win.add_breakpoint(self._compact_breakpoint)
-        self.win.connect("notify::current-breakpoint", self._on_breakpoint_changed)
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_string(CSS)
@@ -986,6 +965,7 @@ class CWApp(Adw.Application):
         )
 
         self.header = Adw.HeaderBar()
+        self.header.add_css_class("top-header")
         self.header_title = Adw.WindowTitle(title="Library", subtitle="")
         self.header.set_title_widget(self.header_title)
         self.win.set_titlebar(self.header)
@@ -1033,7 +1013,16 @@ class CWApp(Adw.Application):
         root.append(main_box)
         root.append(footer)
 
-        self.win.set_child(root)
+        self.app_backdrop = Gtk.Picture()
+        self.app_backdrop.set_content_fit(Gtk.ContentFit.COVER)
+        self.app_backdrop.set_can_shrink(True)
+        self.app_backdrop.set_hexpand(True)
+        self.app_backdrop.set_vexpand(True)
+        self.app_backdrop.set_opacity(0.34)
+        app_shell = Gtk.Overlay()
+        app_shell.set_child(self.app_backdrop)
+        app_shell.add_overlay(root)
+        self.win.set_child(app_shell)
 
         first_row = self.nav_list.get_row_at_index(0)
         if first_row:
@@ -1057,6 +1046,9 @@ class CWApp(Adw.Application):
             self.cfg["wallpapers"] = wallpapers
             save_config(self.cfg)
         self._update_footer(wallpapers)
+        self._set_app_backdrop(
+            self.cfg.get("current") or next(iter(wallpapers.values()), None)
+        )
 
         if self.cfg.get("rotation", False):
             self._start_rotation()
@@ -1487,12 +1479,12 @@ class CWApp(Adw.Application):
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
-        content.set_halign(Gtk.Align.CENTER)
+        content.set_hexpand(True)
+        content.set_halign(Gtk.Align.FILL)
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        card.set_hexpand(True)
         card.add_css_class("detail-card")
-        self._detail_card = card
-        self._on_breakpoint_changed(self.win, None)
         # Preview area
         preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         preview_box.set_hexpand(True)
@@ -1606,7 +1598,15 @@ class CWApp(Adw.Application):
         sidebar.append(back_lib_btn)
 
         card.append(sidebar)
-        content.append(card)
+        responsive_card = Adw.BreakpointBin()
+        responsive_card.set_hexpand(True)
+        breakpoint = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 560px")
+        )
+        breakpoint.add_setter(card, "orientation", Gtk.Orientation.VERTICAL)
+        responsive_card.add_breakpoint(breakpoint)
+        responsive_card.set_child(card)
+        content.append(responsive_card)
 
         # Navigation hint
         hint = Gtk.Label(label="Use arrow keys to navigate gallery")
@@ -1619,14 +1619,6 @@ class CWApp(Adw.Application):
         page.append(scroll)
 
         return page
-
-    def _on_breakpoint_changed(self, _window, _param):
-        if self._detail_card is None:
-            return
-        compact = self.win.get_current_breakpoint() == self._compact_breakpoint
-        self._detail_card.set_orientation(
-            Gtk.Orientation.VERTICAL if compact else Gtk.Orientation.HORIZONTAL
-        )
 
     def _update_header_for_page(self, page, detail_name=None):
         if page == "library":
@@ -1835,6 +1827,17 @@ class CWApp(Adw.Application):
     def _update_header_info(self, text):
         pass
 
+    def _set_app_backdrop(self, path):
+        if not path or not Path(path).exists():
+            self.app_backdrop.set_paintable(None)
+            return
+        thumb = get_thumb_large(Path(path))
+        if thumb.exists():
+            blurred = get_thumb_blurred(thumb)
+            self.app_backdrop.set_filename(str(blurred))
+        else:
+            self.app_backdrop.set_paintable(None)
+
     def _apply(self, path: str):
         print(f"[papyrus] _apply called with {path}")
 
@@ -1883,6 +1886,7 @@ class CWApp(Adw.Application):
 
         self.cfg["current"] = path
         save_config(self.cfg)
+        self._set_app_backdrop(path)
         self.banner.set_title(self._active_status(self.cfg.get("wallpapers", {})) + theme_status)
 
         if self.autostart_sw.get_active():
@@ -1901,6 +1905,7 @@ class CWApp(Adw.Application):
         self.cfg["current"] = None
         self.cfg["wallpapers"] = {}
         save_config(self.cfg)
+        self._set_app_backdrop(None)
         self.banner.set_title("No wallpaper active")
         self._update_footer({})
         self._populate()
@@ -1958,6 +1963,7 @@ class CWApp(Adw.Application):
             save_config(self.cfg)
         self.cfg["current"] = str(pick)
         save_config(self.cfg)
+        self._set_app_backdrop(str(pick))
         self._update_footer(self.cfg.get("wallpapers", {}))
         self._populate()
         return True
