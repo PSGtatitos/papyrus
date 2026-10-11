@@ -73,6 +73,7 @@ def load_config():
             pass
     return {"current": None, "wallpapers": {}, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*",
             "scaling": {}, "auto_theme": False, "rotation": False, "interval": 30, "order": "random",
+            "frosted_glass": True, "glass_blur": 18,
             "seq_index": 0, "last_output_idx": 0, "last_scaling_idx": 0}
 
 def save_config(cfg):
@@ -431,9 +432,12 @@ def get_thumb_large(path: Path) -> Path:
         )
     return thumb
 
-def get_thumb_blurred(thumb: Path) -> Path:
+def get_thumb_blurred(thumb: Path, radius=18) -> Path:
     """Return a cached, blurred copy of a wallpaper thumbnail for the app backdrop."""
-    blurred = thumb.with_name(thumb.stem + "_blur.jpg")
+    radius = max(0, min(40, int(radius)))
+    if radius == 0:
+        return thumb
+    blurred = thumb.with_name(f"{thumb.stem}_blur_{radius}.jpg")
     try:
         if not thumb.exists():
             return thumb
@@ -441,7 +445,7 @@ def get_thumb_blurred(thumb: Path) -> Path:
             return blurred
         from PIL import Image, ImageFilter
         with Image.open(thumb) as image:
-            image.convert("RGB").filter(ImageFilter.GaussianBlur(18)).save(
+            image.convert("RGB").filter(ImageFilter.GaussianBlur(radius)).save(
                 blurred, "JPEG", quality=82
             )
         return blurred
@@ -543,9 +547,10 @@ CSS = """
 
 /* Sidebar */
 .sidebar {
-    background-color: alpha(@surface-container-low, 0.68);
-    border-right: 1px solid @outline-variant;
+    background-color: alpha(@surface-container-low, 0.62);
+    border-right: 1px solid alpha(@outline-variant, 0.62);
     padding: 12px;
+    box-shadow: 4px 0 20px alpha(black, 0.18);
 }
 .sidebar-title {
     padding: 0 8px;
@@ -588,7 +593,7 @@ CSS = """
 
 /* Header Bar */
 .top-header {
-    background-color: alpha(@surface, 0.68);
+    background-color: alpha(@surface, 0.62);
     border-bottom: 1px solid alpha(@outline-variant, 0.55);
     min-height: 48px;
     padding: 0 16px;
@@ -716,7 +721,7 @@ toggle-switch slider {
 
 /* Footer */
 .footer-bar {
-    background-color: alpha(@surface, 0.68);
+    background-color: @surface;
     border-top: 1px solid alpha(@outline-variant, 0.55);
     padding: 4px 16px;
 }
@@ -753,7 +758,7 @@ scrollbar slider:hover {
 
 /* FlowBox */
 flowbox {
-    background: alpha(@surface, 0.35);
+    background: transparent;
 }
 flowboxchild {
     background: transparent;
@@ -819,6 +824,21 @@ separator {
 .detail-sidebar {
     background-color: alpha(@surface-container, 0.62);
 }
+.main-content {
+    background-color: transparent;
+}
+.app-backdrop-tint {
+    background-color: alpha(@surface-dim, 0.22);
+}
+.frosted-glass-off .sidebar { background-color: @surface-container-low; }
+.frosted-glass-off .footer-bar { background-color: @surface; }
+.frosted-glass-off .settings-row { background-color: @surface-container; }
+.frosted-glass-off .main-content { background-color: @surface; }
+.frosted-glass-off flowbox { background: @surface; }
+.frosted-glass-off .engine-status { background-color: @surface-container; }
+.frosted-glass-off .detail-card { background-color: @surface-container-low; }
+.frosted-glass-off .detail-sidebar { background-color: @surface-container; }
+.top-header.frosted-glass-off { background-color: @surface; }
 .color-swatch {
     border-radius: 9999px;
     border: 1px solid @outline-variant;
@@ -968,7 +988,22 @@ class CWApp(Adw.Application):
         self.header.add_css_class("top-header")
         self.header_title = Adw.WindowTitle(title="Library", subtitle="")
         self.header.set_title_widget(self.header_title)
-        self.win.set_titlebar(self.header)
+        self.header_backdrop = Gtk.Picture()
+        self.header_backdrop.set_content_fit(Gtk.ContentFit.COVER)
+        self.header_backdrop.set_can_shrink(True)
+        self.header_backdrop.set_hexpand(True)
+        self.header_backdrop.set_vexpand(False)
+        self.header_backdrop.set_opacity(0.82)
+        self.header_backdrop.set_can_target(False)
+        self.titlebar_shell = Gtk.Overlay()
+        titlebar_spacer = Gtk.Box()
+        titlebar_spacer.set_size_request(1, 1)
+        self.titlebar_shell.set_child(titlebar_spacer)
+        self.titlebar_shell.add_overlay(self.header_backdrop)
+        self.titlebar_shell.set_measure_overlay(self.header_backdrop, False)
+        self.titlebar_shell.add_overlay(self.header)
+        self.titlebar_shell.set_measure_overlay(self.header, True)
+        self.win.set_titlebar(self.titlebar_shell)
 
         self.add_btn = Gtk.Button(tooltip_text="Add folder")
         self.add_btn.set_child(Gtk.Image.new_from_gicon(
@@ -995,6 +1030,7 @@ class CWApp(Adw.Application):
         main_box.append(sidebar)
 
         self.stack = Gtk.Stack()
+        self.stack.add_css_class("main-content")
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.stack.set_hexpand(True)
         self.stack.set_vexpand(True)
@@ -1018,11 +1054,14 @@ class CWApp(Adw.Application):
         self.app_backdrop.set_can_shrink(True)
         self.app_backdrop.set_hexpand(True)
         self.app_backdrop.set_vexpand(True)
-        self.app_backdrop.set_opacity(0.34)
-        app_shell = Gtk.Overlay()
-        app_shell.set_child(self.app_backdrop)
-        app_shell.add_overlay(root)
-        self.win.set_child(app_shell)
+        self.app_shell = Gtk.Overlay()
+        self.app_shell.set_child(self.app_backdrop)
+        self.glass_tint = Gtk.Box()
+        self.glass_tint.add_css_class("app-backdrop-tint")
+        self.glass_tint.set_can_target(False)
+        self.app_shell.add_overlay(self.glass_tint)
+        self.app_shell.add_overlay(root)
+        self.win.set_child(self.app_shell)
 
         first_row = self.nav_list.get_row_at_index(0)
         if first_row:
@@ -1114,7 +1153,21 @@ class CWApp(Adw.Application):
         engine_box.append(engine_inner)
         sidebar.append(engine_box)
 
-        return sidebar
+        sidebar_overlay = Gtk.Overlay()
+        sidebar_spacer = Gtk.Box()
+        sidebar_spacer.set_size_request(1, 1)
+        sidebar_overlay.set_child(sidebar_spacer)
+        self.sidebar_backdrop = Gtk.Picture()
+        self.sidebar_backdrop.set_content_fit(Gtk.ContentFit.COVER)
+        self.sidebar_backdrop.set_can_shrink(True)
+        self.sidebar_backdrop.set_hexpand(True)
+        self.sidebar_backdrop.set_vexpand(True)
+        self.sidebar_backdrop.set_can_target(False)
+        sidebar_overlay.add_overlay(self.sidebar_backdrop)
+        sidebar_overlay.set_measure_overlay(self.sidebar_backdrop, False)
+        sidebar_overlay.add_overlay(sidebar)
+        sidebar_overlay.set_measure_overlay(sidebar, True)
+        return sidebar_overlay
 
     def _make_nav_row(self, page_name, label_text):
         box = Gtk.Box(spacing=12)
@@ -1189,6 +1242,58 @@ class CWApp(Adw.Application):
 
         gen_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         gen_box.add_css_class("settings-group-container")
+
+        # Frosted glass controls
+        glass_box = Gtk.Box(spacing=16)
+        glass_box.add_css_class("settings-row")
+        glass_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        glass_lbl = Gtk.Label(label="Frosted Glass", xalign=0)
+        glass_lbl.add_css_class("control-label")
+        glass_desc = Gtk.Label(
+            label="Show a blurred wallpaper behind the top bar, sidebar, and content panels.",
+            xalign=0, wrap=True,
+        )
+        glass_desc.add_css_class("status-label")
+        glass_desc.add_css_class("settings-desc")
+        glass_text.append(glass_lbl)
+        glass_text.append(glass_desc)
+        glass_box.append(glass_text)
+
+        self.frosted_glass_sw = Gtk.Switch(
+            active=self.cfg.get("frosted_glass", True)
+        )
+        self.frosted_glass_sw.set_valign(Gtk.Align.CENTER)
+        self.frosted_glass_sw.connect("notify::active", self._on_frosted_glass_toggled)
+        glass_box.append(self.frosted_glass_sw)
+        gen_box.append(glass_box)
+
+        blur_box = Gtk.Box(spacing=16)
+        blur_box.add_css_class("settings-row")
+        blur_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        blur_lbl = Gtk.Label(label="Backdrop Blur", xalign=0)
+        blur_lbl.add_css_class("control-label")
+        blur_desc = Gtk.Label(
+            label="0 is clear; increase the value for a softer, blurrier backdrop.",
+            xalign=0, wrap=True,
+        )
+        blur_desc.add_css_class("status-label")
+        blur_desc.add_css_class("settings-desc")
+        blur_text.append(blur_lbl)
+        blur_text.append(blur_desc)
+        blur_box.append(blur_text)
+
+        self.glass_blur_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 40, 1
+        )
+        self.glass_blur_scale.set_digits(0)
+        self.glass_blur_scale.set_draw_value(True)
+        self.glass_blur_scale.set_hexpand(True)
+        self.glass_blur_scale.set_size_request(180, -1)
+        self.glass_blur_scale.set_value(self.cfg.get("glass_blur", 18))
+        self.glass_blur_scale.set_sensitive(self.frosted_glass_sw.get_active())
+        self.glass_blur_scale.connect("value-changed", self._on_glass_blur_changed)
+        blur_box.append(self.glass_blur_scale)
+        gen_box.append(blur_box)
 
         # Start on Login row
         login_box = Gtk.Box(spacing=16)
@@ -1828,15 +1933,51 @@ class CWApp(Adw.Application):
         pass
 
     def _set_app_backdrop(self, path):
+        enabled = self.cfg.get("frosted_glass", True)
+        if enabled:
+            self.app_shell.remove_css_class("frosted-glass-off")
+            self.header.remove_css_class("frosted-glass-off")
+            self.glass_tint.set_visible(True)
+        else:
+            self.app_shell.add_css_class("frosted-glass-off")
+            self.header.add_css_class("frosted-glass-off")
+            self.glass_tint.set_visible(False)
+            self.app_backdrop.set_paintable(None)
+            self.header_backdrop.set_paintable(None)
+            self.sidebar_backdrop.set_paintable(None)
+            return
         if not path or not Path(path).exists():
             self.app_backdrop.set_paintable(None)
+            self.header_backdrop.set_paintable(None)
+            self.sidebar_backdrop.set_paintable(None)
             return
         thumb = get_thumb_large(Path(path))
         if thumb.exists():
-            blurred = get_thumb_blurred(thumb)
+            blurred = get_thumb_blurred(thumb, self.cfg.get("glass_blur", 18))
             self.app_backdrop.set_filename(str(blurred))
+            self.header_backdrop.set_filename(str(blurred))
+            self.sidebar_backdrop.set_filename(str(blurred))
         else:
             self.app_backdrop.set_paintable(None)
+            self.header_backdrop.set_paintable(None)
+            self.sidebar_backdrop.set_paintable(None)
+
+    def _on_frosted_glass_toggled(self, switch, _param):
+        self.cfg["frosted_glass"] = switch.get_active()
+        self.glass_blur_scale.set_sensitive(switch.get_active())
+        save_config(self.cfg)
+        current = self.cfg.get("current") or next(
+            iter((self.cfg.get("wallpapers", {}) or {}).values()), None
+        )
+        self._set_app_backdrop(current)
+
+    def _on_glass_blur_changed(self, scale):
+        self.cfg["glass_blur"] = int(scale.get_value())
+        save_config(self.cfg)
+        current = self.cfg.get("current") or next(
+            iter((self.cfg.get("wallpapers", {}) or {}).values()), None
+        )
+        self._set_app_backdrop(current)
 
     def _apply(self, path: str):
         print(f"[papyrus] _apply called with {path}")
