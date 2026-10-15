@@ -896,10 +896,14 @@ separator {
 }
 .primary-btn {
     background-color: @primary;
-    color: @on-primary;
+    color: #000000;
     border-radius: 8px;
     padding: 8px 24px;
     font-weight: 700;
+}
+button.primary-btn,
+button.primary-btn label {
+    color: #000000;
 }
 .primary-btn:hover {
     opacity: 0.9;
@@ -1038,10 +1042,12 @@ class CWApp(Adw.Application):
         self.lib_page = self._build_library_page()
         self.settings_page = self._build_settings_page()
         self.help_page = self._build_help_page()
+        self.discover_page = self._build_discover_page()
 
         self.stack.add_titled(self.lib_page, "library", "Library")
         self.stack.add_titled(self.settings_page, "settings", "Settings")
         self.stack.add_titled(self.help_page, "help", "Help")
+        self.stack.add_titled(self.discover_page, "discover", "Find Wallpapers")
 
         main_box.append(self.stack)
 
@@ -1121,6 +1127,8 @@ class CWApp(Adw.Application):
         nav_list.append(set_row)
         help_row = self._make_nav_row("help", "Help")
         nav_list.append(help_row)
+        discover_row = self._make_nav_row("discover", "Find Wallpapers")
+        nav_list.append(discover_row)
 
         nav_list.connect("row-selected", self._on_nav_selected)
         self.nav_list = nav_list
@@ -1178,6 +1186,7 @@ class CWApp(Adw.Application):
                          "preferences-desktop-symbolic"],
             "help": ["help-browser-symbolic", "help-about-symbolic",
                      "dialog-question"],
+            "discover": ["web-browser-symbolic", "internet-web-browser-symbolic"],
         }
         icon = Gtk.Image()
         icon.set_from_gicon(Gio.ThemedIcon.new_from_names(fallbacks.get(page_name, [])))
@@ -1538,6 +1547,60 @@ class CWApp(Adw.Application):
         outer.append(scroll)
         return outer
 
+    def _build_discover_page(self):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        scroll = Gtk.ScrolledWindow(vexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
+                       margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
+        intro = Gtk.Label(
+            label="Browse wallpaper collections from your browser, then add downloaded files to your Papyrus library.",
+            xalign=0, wrap=True
+        )
+        intro.add_css_class("body-base")
+        page.append(intro)
+
+        sources = [
+            ("MoeWalls", "Anime and gaming wallpapers, often available as WebM or MP4.",
+             "https://moewalls.com/", True),
+            ("MotionBGs", "A large collection of animated wallpapers, including 4K.",
+             "https://motionbgs.com/", False),
+            ("Wallsflow", "A growing collection of free wallpapers.",
+             "https://wallsflow.com/", False),
+            ("Pexels Videos", "Cinematic and nature videos, including 4K footage.",
+             "https://www.pexels.com/videos/", False),
+        ]
+        for name, description, url, recommended in sources:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            card.add_css_class("settings-row")
+            title = Gtk.Label(label=f"{name}  ·  Recommended" if recommended else name, xalign=0)
+            title.add_css_class("window-title" if recommended else "control-label")
+            card.append(title)
+            detail = Gtk.Label(label=description, xalign=0, wrap=True)
+            detail.add_css_class("settings-desc")
+            card.append(detail)
+            open_btn = Gtk.Button(label=f"Visit {name}")
+            open_btn.set_halign(Gtk.Align.START)
+            if recommended:
+                open_btn.add_css_class("primary-btn")
+            open_btn.connect("clicked", lambda _, target=url: Gio.AppInfo.launch_default_for_uri(target))
+            card.append(open_btn)
+            page.append(card)
+
+        note = Gtk.Label(
+            label="Papyrus does not download files from these sites. Download only files you trust, then choose them from your library.",
+            xalign=0, wrap=True
+        )
+        note.add_css_class("status-label")
+        page.append(note)
+
+        clamp = Adw.Clamp(maximum_size=720)
+        clamp.set_child(page)
+        scroll.set_child(clamp)
+        outer.append(scroll)
+        return outer
+
     def _build_footer(self):
         footer = Gtk.Box(spacing=0)
         footer.add_css_class("footer-bar")
@@ -1745,6 +1808,12 @@ class CWApp(Adw.Application):
             self.add_btn.set_visible(False)
             self.stop_btn.set_visible(False)
             self.back_btn.set_visible(False)
+        elif page == "discover":
+            self.header_title.set_title("Find Wallpapers")
+            self.header_title.set_subtitle("")
+            self.add_btn.set_visible(False)
+            self.stop_btn.set_visible(False)
+            self.back_btn.set_visible(False)
         elif page == "detail" and detail_name:
             self.header_title.set_title(detail_name)
             self.header_title.set_subtitle("")
@@ -1756,8 +1825,8 @@ class CWApp(Adw.Application):
         self._current_page = name
         self.stack.set_visible_child_name(name)
         self._update_header_for_page(name)
-        if name in ("library", "settings", "help") and self.nav_list:
-            idx = {"library": 0, "settings": 1, "help": 2}[name]
+        if name in ("library", "settings", "help", "discover") and self.nav_list:
+            idx = {"library": 0, "settings": 1, "help": 2, "discover": 3}[name]
             row = self.nav_list.get_row_at_index(idx)
             if row:
                 self.nav_list.select_row(row)
