@@ -21,11 +21,14 @@ import threading
 import signal
 import random
 import urllib.request
+import sys
+import time
+import fcntl
 from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.3.4"
+VERSION      = "1.3.5"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -64,6 +67,7 @@ COSMIC_LIGHT  = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light/v1"
 COSMIC_DARK_B = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark.Builder/v1"
 COSMIC_LIGHT_B= Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light.Builder/v1"
 COSMIC_MODE   = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Mode/v1"
+ROTATION_LOCK = CONFIG_DIR / "rotation.lock"
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -204,7 +208,7 @@ def apply_wallpaper(path: str, output: str, scaling="fit"):
         f.write(f"[{ts}] running: {' '.join(cmd)}\n")
     try:
         err_path = CONFIG_DIR / f"mpvpaper_{output}.log"
-        err_fd = open(err_path, "a")
+        err_fd = open(err_path, "w")
         proc = subprocess.Popen(
             cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err_fd,
         )
@@ -246,6 +250,10 @@ def write_autostart_script(wallpapers: dict, scaling: dict) -> Path:
             lines.append(f'flatpak-spawn --host mpvpaper --fork -o "{opts}" {out_q} {path_q}')
         else:
             lines.append(f'mpvpaper --fork -o "{opts}" {out_q} {path_q}')
+    if load_config().get("rotation", False):
+        executable = shlex.quote(str(Path(__file__).resolve()))
+        python = shlex.quote(sys.executable)
+        lines.append(f"{python} {executable} --rotation-daemon &")
     script.write_text("\n".join(lines) + "\n")
     script.chmod(0o755)
     return script
@@ -390,6 +398,65 @@ def scan_wallpapers(dirs):
                 if f.is_file() and f.suffix.lower() in WALLPAPER_EXTS:
                     wallpapers.append(f)
     return wallpapers
+
+def start_rotation_daemon():
+    try:
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--rotation-daemon"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True,
+        )
+    except Exception as e:
+        print(f"[papyrus] failed to start rotation service: {e}")
+
+def run_rotation_daemon():
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    lock = ROTATION_LOCK.open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return
+
+    elapsed = 0
+    while True:
+        cfg = load_config()
+        if not cfg.get("rotation", False):
+            return
+        if not cfg.get("current") and not cfg.get("wallpapers"):
+            return
+        interval = max(int(cfg.get("interval", 30)), 1) * 60
+        if elapsed < interval:
+            time.sleep(1)
+            elapsed += 1
+            continue
+
+        files = sorted(scan_wallpapers(cfg.get("dirs", [str(d) for d in DEFAULT_DIRS])), key=lambda p: str(p))
+        if files:
+            order = cfg.get("order", "random")
+            index = int(cfg.get("seq_index", 0))
+            current = cfg.get("current") or next(iter((cfg.get("wallpapers", {}) or {}).values()), None)
+            candidates = [path for path in files if str(path) != current] or files
+            if order == "random":
+                selected = random.choice(candidates)
+            else:
+                selected = files[index % len(files)]
+                if str(selected) == current and len(files) > 1:
+                    index = (index + 1) % len(files)
+                    selected = files[index]
+                cfg["seq_index"] = (index + 1) % len(files)
+            output_map = cfg.get("wallpapers", {}) or {}
+            outputs = list(output_map) or [cfg.get("output", "*")]
+            scaling_map = cfg.get("scaling", {}) or {}
+            for output in outputs:
+                proc, err = apply_wallpaper(str(selected), output, scaling_map.get(output, "fit"))
+                if err:
+                    print(f"[papyrus] rotation service error on {output}: {err}")
+                    continue
+                output_map[output] = str(selected)
+            cfg["wallpapers"] = output_map
+            cfg["current"] = str(selected)
+            save_config(cfg)
+        elapsed = 0
 
 def _make_image_thumbnail(path: Path, thumb: Path, width: int):
     """Create an image thumbnail without relying on ffmpeg's still-image handling."""
@@ -2087,11 +2154,15 @@ class CWApp(Adw.Application):
                     tail = ""
                     try:
                         if err_log.exists():
-                            tail = " — " + err_log.read_text(errors="ignore").splitlines()[-1].strip()
+                            error_lines = [line.strip() for line in err_log.read_text(errors="ignore").splitlines() if line.strip()]
+                            tail = " — " + error_lines[-1] if error_lines else ""
                     except Exception:
                         pass
-                    GLib.idle_add(lambda: self.banner.set_title(
-                        f"mpvpaper failed (code {rc}){tail}"))
+                    if any(term in tail.lower() for term in ("layer_shell", "layer shell", "layer-shell")):
+                        message = "This compositor does not support mpvpaper's required Wayland layer-shell protocol. GNOME is currently unsupported."
+                    else:
+                        message = f"mpvpaper failed (code {rc}){tail}"
+                    GLib.idle_add(lambda m=message: self.banner.set_title(m))
             threading.Thread(target=monitor, daemon=True).start()
 
         self.cfg["current"] = path
@@ -2180,15 +2251,11 @@ class CWApp(Adw.Application):
 
     def _start_rotation(self):
         self._stop_rotation()
-        interval = max(self.cfg.get("interval", 30), 1) * 60000
-        print(f"[papyrus] rotation started: interval={interval}ms ({interval//60000}min)")
-        self._rotation_source = GLib.timeout_add(interval, self._rotate_wallpaper)
+        print(f"[papyrus] rotation service requested: interval={self.cfg.get('interval', 30)}min")
+        start_rotation_daemon()
 
     def _stop_rotation(self):
-        if self._rotation_source is not None:
-            print(f"[papyrus] rotation stopped (source={self._rotation_source})")
-            GLib.source_remove(self._rotation_source)
-            self._rotation_source = None
+        self._rotation_source = None
 
     def _on_rotation_toggle(self, sw, _param):
         active = sw.get_active()
@@ -2199,12 +2266,16 @@ class CWApp(Adw.Application):
             self._start_rotation()
         else:
             self._stop_rotation()
+        if self.autostart_sw.get_active():
+            write_autostart(self.cfg.get("wallpapers", {}), self.cfg.get("scaling", {}))
 
     def _on_interval_changed(self, spin, _param):
         self.cfg["interval"] = int(spin.get_value())
         save_config(self.cfg)
         if self.cfg.get("rotation", False):
             self._start_rotation()
+            if self.autostart_sw.get_active():
+                write_autostart(self.cfg.get("wallpapers", {}), self.cfg.get("scaling", {}))
 
     def _on_order_changed(self, dd, _param):
         idx = dd.get_selected()
@@ -2270,6 +2341,9 @@ class CWApp(Adw.Application):
         Gio.AppInfo.launch_default_for_uri(RELEASES_URL)
 
 if __name__ == "__main__":
+    if "--rotation-daemon" in sys.argv:
+        run_rotation_daemon()
+        raise SystemExit(0)
     if not shutil.which("mpvpaper") and not Path("/app/bin/mpvpaper").exists():
         print("mpvpaper not found. Install it first.")
         raise SystemExit(1)
