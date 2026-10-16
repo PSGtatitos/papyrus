@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/icon.png" alt="Papyrus Logo" width="128" height="128">
   <h1>Papyrus</h1>
-  <p>Animated wallpaper manager for any Wayland desktop</p>
+  <p>Animated wallpaper manager for Wayland compositors with layer-shell support</p>
 
   ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
   ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
@@ -16,11 +16,11 @@
 <img width="983" height="636" alt="image" src="https://github.com/user-attachments/assets/cab200e9-4b70-4c3f-975d-5cc839f22711" />
 
 
-Papyrus is a free, open-source wallpaper manager for any Wayland desktop. Pick a video or image, click it, and it becomes your wallpaper — no accounts, no telemetry, no Wallpaper Engine required.
+Papyrus is a free, open-source wallpaper manager for Wayland compositors that support the layer-shell protocol. Pick a video or image, click it, and it becomes your wallpaper — no accounts, no telemetry, no Wallpaper Engine required.
 
-Built primarily for the COSMIC desktop, but it runs on any Wayland compositor (COSMIC, GNOME, Hyprland, Sway, KDE Wayland, OMarchy, and more) because it uses [mpvpaper](https://github.com/GhostNaN/mpvpaper) under the hood.
+Built primarily for COSMIC desktop. Papyrus uses [mpvpaper](https://github.com/GhostNaN/mpvpaper), which requires a compositor that implements `wlr-layer-shell` (such as wlroots-based compositors). GNOME/Mutter and KDE Plasma do not currently support this protocol, so animated wallpapers will not work there. Papyrus reports this limitation when it detects the protocol error.
 
-It also automatically extracts the dominant color from your wallpaper and applies it as your COSMIC accent color, so your entire desktop theme matches your wallpaper vibe. (Auto-theming is a COSMIC-only extra — wallpapers themselves work everywhere.)
+It also automatically extracts the dominant color from your wallpaper and applies it as your COSMIC accent color, so your entire desktop theme matches your wallpaper vibe. Auto-theming is a COSMIC-only extra.
 
 ## Features
 
@@ -86,6 +86,7 @@ papyrus
 Click any thumbnail to set it as your wallpaper
 Folder button (top left) to add wallpaper folders
 Playlist tab in Settings to enable auto-rotation with configurable interval (random or sequential)
+Rotation continues in the background after the Papyrus window is closed. Enable **Start on Login** as well to resume rotation automatically after logging in.
 Auto-theme (COSMIC) toggle to enable/disable automatic COSMIC theming
 Stop button (top right) to remove the wallpaper
 Update banner appears automatically when a new version is available
@@ -95,7 +96,7 @@ MotionBGs — 8,000+ wallpapers in 4K
 Wallsflow — growing collection, free
 Pexels Videos — cinematic/nature, 4K
 How it works
-Papyrus uses mpvpaper to render video and image files as Wayland layer surfaces behind your desktop. When you select a wallpaper, Papyrus:
+Papyrus uses mpvpaper to render video and image files as Wayland layer surfaces behind your desktop. This requires compositor support for `wlr-layer-shell`. When you select a wallpaper, Papyrus:
 
 Kills any running mpvpaper instance
 Starts mpvpaper with loop enabled on your display output
