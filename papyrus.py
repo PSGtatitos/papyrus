@@ -2084,6 +2084,7 @@ class CWApp(Adw.Application):
             self.sidebar_backdrop.set_paintable(None)
             return
         if not path or not Path(path).exists():
+            print("[papyrus] backdrop not set: no active wallpaper file")
             self.app_backdrop.set_paintable(None)
             self.header_backdrop.set_paintable(None)
             self.sidebar_backdrop.set_paintable(None)
@@ -2091,10 +2092,15 @@ class CWApp(Adw.Application):
         thumb = get_thumb_large(Path(path))
         if thumb.exists():
             blurred = get_thumb_blurred(thumb, self.cfg.get("glass_blur", 18))
+            print(
+                f"[papyrus] backdrop thumbnail selected: {blurred.name} "
+                f"(exists={blurred.exists()}, blur={self.cfg.get('glass_blur', 18)})"
+            )
             self.app_backdrop.set_filename(str(blurred))
             self.header_backdrop.set_filename(str(blurred))
             self.sidebar_backdrop.set_filename(str(blurred))
         else:
+            print("[papyrus] backdrop not set: source thumbnail was not created")
             self.app_backdrop.set_paintable(None)
             self.header_backdrop.set_paintable(None)
             self.sidebar_backdrop.set_paintable(None)
@@ -2110,6 +2116,7 @@ class CWApp(Adw.Application):
 
     def _on_glass_blur_changed(self, scale):
         self.cfg["glass_blur"] = int(scale.get_value())
+        print(f"[papyrus] blur slider changed: {self.cfg['glass_blur']}")
         save_config(self.cfg)
         current = self.cfg.get("current") or next(
             iter((self.cfg.get("wallpapers", {}) or {}).values()), None
