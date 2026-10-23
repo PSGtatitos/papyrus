@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-VERSION      = "1.3.5"
+VERSION      = "1.3.6"
 API_URL      = "https://api.github.com/repos/PSGtatitos/papyrus/releases/latest"
 RELEASES_URL = "https://github.com/PSGtatitos/papyrus/releases/latest"
 IN_FLATPAK   = Path("/app/bin/mpvpaper").exists()
@@ -516,7 +516,8 @@ def get_thumb_blurred(thumb: Path, radius=18) -> Path:
                 blurred, "JPEG", quality=82
             )
         return blurred
-    except Exception:
+    except Exception as e:
+        print(f"[papyrus] failed to generate blurred thumbnail {blurred}: {e}", file=sys.stderr)
         return thumb
 
 def get_video_resolution(path: Path) -> str:
