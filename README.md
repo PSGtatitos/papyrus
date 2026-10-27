@@ -28,6 +28,7 @@ It also automatically extracts the dominant color from your wallpaper and applie
 - 🖥️ **Per-monitor wallpapers** — set different videos or images on each monitor independently
 - 📐 **Per-monitor scaling** — choose Fit, Fill, or Stretch for each output
 - 🔄 **Playlist rotation** — auto-switch wallpapers at a set interval (random or sequential order)
+- 🔎 **Library search and organization** — search by filename or folder, filter by media type or active state, and sort by name, date, or file size
 - 🎨 **Auto-theme (COSMIC)** — extracts accent color from wallpaper and applies it to your COSMIC theme
 - 🌙 **Auto dark/light mode** — detects wallpaper brightness and switches accordingly
 - 📁 **Folder picker** — choose any folder of video or image files to scan
@@ -50,6 +51,12 @@ The universal installer detects your distro and handles everything:
 curl -fsSL https://raw.githubusercontent.com/PSGtatitos/papyrus/main/install.sh | bash
 ```
 Supports: Pop, Ubuntu, Debian, Fedora, openSUSE. Arch-based users should use the AUR package instead.
+
+### Fedora COPR
+
+RPM packaging recipes for Papyrus and its `mpvpaper` dependency are in
+[`packaging/fedora`](packaging/fedora). The COPR repository is not published
+yet; maintainers can use that directory to build and submit both packages.
 
 AUR (Arch Linux / CachyOS / Manjaro)
 Install from the AUR using your preferred AUR helper:

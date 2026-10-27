@@ -1338,6 +1338,8 @@ class CWApp(Adw.Application):
             d.mkdir(parents=True, exist_ok=True)
         self._current_page = "library"
         self._rotation_source = None
+        self._library_total = 0
+        self._library_visible = 0
 
     def _ensure_icon_theme(self):
         # COSMIC / Pop!_OS ship an icon theme that reports having the Adwaita
@@ -1632,6 +1634,46 @@ class CWApp(Adw.Application):
         outer.append(self.banner)
 
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, margin_start=16, margin_end=16, margin_top=16, margin_bottom=16)
+
+        self.library_controls = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_bottom=12
+        )
+        self.library_search = Gtk.SearchEntry(
+            placeholder_text="Search wallpapers by name or folder…",
+            hexpand=True,
+        )
+        self.library_search.connect("search-changed", self._on_library_controls_changed)
+        self.library_controls.append(self.library_search)
+
+        filter_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.library_type_filter = Gtk.DropDown.new_from_strings(
+            ["All Types", "Videos", "Images"]
+        )
+        self.library_type_filter.set_hexpand(True)
+        self.library_type_filter.connect(
+            "notify::selected", self._on_library_controls_changed
+        )
+        filter_row.append(self.library_type_filter)
+
+        self.library_status_filter = Gtk.DropDown.new_from_strings(
+            ["All Wallpapers", "Active", "Inactive"]
+        )
+        self.library_status_filter.set_hexpand(True)
+        self.library_status_filter.connect(
+            "notify::selected", self._on_library_controls_changed
+        )
+        filter_row.append(self.library_status_filter)
+
+        self.library_sort = Gtk.DropDown.new_from_strings(
+            ["Name: A–Z", "Name: Z–A", "Newest", "Oldest", "Largest", "Smallest"]
+        )
+        self.library_sort.set_hexpand(True)
+        self.library_sort.connect(
+            "notify::selected", self._on_library_controls_changed
+        )
+        filter_row.append(self.library_sort)
+        self.library_controls.append(filter_row)
+        self.content_box.append(self.library_controls)
 
         self.flow = Gtk.FlowBox(
             valign=Gtk.Align.START,
@@ -2278,8 +2320,9 @@ class CWApp(Adw.Application):
             self.add_btn.set_visible(True)
             self.stop_btn.set_visible(True)
             self.back_btn.set_visible(False)
-            wallpapers = scan_wallpapers(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
-            self.header_title.set_subtitle(f"{len(wallpapers)} items found")
+            total = getattr(self, "_library_total", 0)
+            visible = getattr(self, "_library_visible", total)
+            self.header_title.set_subtitle(f"{visible} of {total} wallpapers")
         elif page == "settings":
             self.header_title.set_title("Settings")
             self.header_title.set_subtitle("")
@@ -2323,10 +2366,53 @@ class CWApp(Adw.Application):
 
         wallpapers_found = scan_wallpapers(self.cfg.get("dirs", [str(d) for d in DEFAULT_DIRS]))
         wallpapers = self.cfg.get("wallpapers", {}) or {}
-        current = self.cfg.get("current")
         active_paths = set(wallpapers.values())
+        query = self.library_search.get_text().strip().casefold()
+        type_filter = self.library_type_filter.get_selected()
+        status_filter = self.library_status_filter.get_selected()
+        sort_mode = self.library_sort.get_selected()
 
-        self.header_title.set_subtitle(f"{len(wallpapers_found)} items found")
+        visible = []
+        metadata = {}
+        for path in wallpapers_found:
+            path_string = str(path)
+            active = path_string in active_paths
+            suffix = path.suffix.lower()
+            if query and query not in path.name.casefold() and query not in str(path.parent).casefold():
+                continue
+            if type_filter == 1 and suffix not in VIDEO_EXTS:
+                continue
+            if type_filter == 2 and suffix not in IMAGE_EXTS:
+                continue
+            if status_filter == 1 and not active:
+                continue
+            if status_filter == 2 and active:
+                continue
+            try:
+                stat = path.stat()
+                metadata[path] = (stat.st_mtime, stat.st_size)
+            except OSError:
+                metadata[path] = (0, 0)
+            visible.append(path)
+
+        if sort_mode in (0, 1):
+            visible.sort(key=lambda path: path.name.casefold(), reverse=(sort_mode == 1))
+        elif sort_mode in (2, 3):
+            visible.sort(
+                key=lambda path: (metadata[path][0], path.name.casefold()),
+                reverse=(sort_mode == 2),
+            )
+        else:
+            visible.sort(
+                key=lambda path: (metadata[path][1], path.name.casefold()),
+                reverse=(sort_mode == 4),
+            )
+
+        self._library_total = len(wallpapers_found)
+        self._library_visible = len(visible)
+        self.header_title.set_subtitle(
+            f"{len(visible)} of {len(wallpapers_found)} wallpapers"
+        )
 
         if not wallpapers_found:
             empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
@@ -2345,8 +2431,39 @@ class CWApp(Adw.Application):
             self.flow.append(empty_box)
             return
 
-        for wallpaper in wallpapers_found:
+        if not visible:
+            empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                                margin_top=80)
+            empty_box.set_halign(Gtk.Align.CENTER)
+            empty_box.add_css_class("empty-state")
+            icon = Gtk.Image.new_from_icon_name("system-search-symbolic")
+            icon.set_pixel_size(48)
+            empty_box.append(icon)
+            lbl = Gtk.Label(
+                label="No wallpapers match your search and filters.",
+                justify=Gtk.Justification.CENTER,
+            )
+            lbl.add_css_class("control-label")
+            empty_box.append(lbl)
+            clear_btn = Gtk.Button(label="Clear Search and Filters")
+            clear_btn.add_css_class("flat")
+            clear_btn.connect("clicked", self._clear_library_controls)
+            empty_box.append(clear_btn)
+            self.flow.append(empty_box)
+            return
+
+        for wallpaper in visible:
             self.flow.append(self._make_card(wallpaper, active=str(wallpaper) in active_paths))
+
+    def _on_library_controls_changed(self, *_args):
+        self._populate()
+
+    def _clear_library_controls(self, _button):
+        self.library_search.set_text("")
+        self.library_type_filter.set_selected(0)
+        self.library_status_filter.set_selected(0)
+        self.library_sort.set_selected(0)
+        self._populate()
 
     def _refresh_folder_list(self):
         while child := self.folder_list_box.get_first_child():
