@@ -30,7 +30,7 @@ Create a Fedora Account System account and a COPR project (suggested name:
 
 ```bash
 copr-cli build papyrus ~/rpmbuild/SRPMS/mpvpaper-1.9-1*.src.rpm
-copr-cli build papyrus ~/rpmbuild/SRPMS/papyrus-1.3.7-1*.src.rpm
+copr-cli build papyrus ~/rpmbuild/SRPMS/papyrus-2.0.0-1*.src.rpm
 ```
 
 Build `mpvpaper` first and wait for it to succeed before submitting Papyrus.

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           papyrus
-Version:        1.3.7
+Version:        2.0.0
 Release:        1%{?dist}
 Summary:        Animated wallpaper manager for Wayland compositors
 License:        GPL-3.0-or-later
@@ -45,5 +45,5 @@ install -Dpm 0644 assets/icon.png \
 %{_datadir}/icons/hicolor/256x256/apps/io.github.PSGtatitos.papyrus.png
 
 %changelog
-* Tue Oct 27 2026 Papyrus maintainers <psgtatitos@github> - 1.3.7-1
+* Tue Oct 27 2026 Papyrus maintainers <psgtatitos@github> - 2.0.0-1
 - Initial COPR package
