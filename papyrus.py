@@ -20,6 +20,7 @@ import shutil
 import threading
 import signal
 import random
+import re
 import urllib.request
 import sys
 import time
@@ -68,6 +69,7 @@ COSMIC_DARK_B = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Dark.Buil
 COSMIC_LIGHT_B= Path.home() / ".config/cosmic/com.system76.CosmicTheme.Light.Builder/v1"
 COSMIC_MODE   = Path.home() / ".config/cosmic/com.system76.CosmicTheme.Mode/v1"
 ROTATION_LOCK = CONFIG_DIR / "rotation.lock"
+SMART_PAUSE_LOCK = CONFIG_DIR / "smart-pause.lock"
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -78,6 +80,8 @@ def load_config():
     return {"current": None, "wallpapers": {}, "dirs": [str(d) for d in DEFAULT_DIRS], "output": "*",
             "scaling": {}, "auto_theme": False, "rotation": False, "interval": 30, "order": "random",
             "frosted_glass": True, "glass_blur": 18,
+            "backdrop_source": "wallpaper", "backdrop_custom": None,
+            "smart_pause": False,
             "seq_index": 0, "last_output_idx": 0, "last_scaling_idx": 0}
 
 def save_config(cfg):
@@ -121,27 +125,36 @@ def discover_mpvpaper_pids():
     return running
 
 def kill_mpvpaper(output=None):
+    def resume_and_stop(pid):
+        try:
+            os.kill(pid, signal.SIGCONT)
+        except ProcessLookupError:
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
     if output:
         pid = _mpvpaper_pids.pop(output, None)
         if pid:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            resume_and_stop(pid)
     else:
+        discover_mpvpaper_pids()
         for pid in list(_mpvpaper_pids.values()):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            resume_and_stop(pid)
         _mpvpaper_pids.clear()
         # Also kill any mpvpaper started before this app session (e.g. from
         # a previous launch) so "Stop" always stops every wallpaper.
         try:
             if Path("/app/bin/mpvpaper").exists():
+                subprocess.run(["flatpak-spawn", "--host", "pkill", "-CONT", "-x", "mpvpaper"],
+                               check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 subprocess.run(["flatpak-spawn", "--host", "pkill", "-x", "mpvpaper"],
                                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
+                subprocess.run(["pkill", "-CONT", "-x", "mpvpaper"],
+                               check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 subprocess.run(["pkill", "-x", "mpvpaper"],
                                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
@@ -192,6 +205,300 @@ def detect_outputs():
             continue
 
     return ["*"]
+
+def detect_smart_pause_backend():
+    """Return a compositor with a usable window-state query, if available."""
+    if IN_FLATPAK:
+        return None
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+    if shutil.which("hyprctl") and (
+        os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") or "hyprland" in desktop
+    ):
+        return "hyprland"
+    if shutil.which("swaymsg") and (
+        os.environ.get("SWAYSOCK") or "sway" in desktop
+    ):
+        return "sway"
+    session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+    if (session_type == "x11" or
+            (not os.environ.get("WAYLAND_DISPLAY") and os.environ.get("DISPLAY"))):
+        if all(shutil.which(tool) for tool in ("wmctrl", "xprop", "xrandr")):
+            return "x11"
+    return None
+
+def smart_pause_backend_name(backend=None):
+    backend = backend or detect_smart_pause_backend()
+    return {
+        "sway": "Sway",
+        "hyprland": "Hyprland",
+        "x11": "X11 desktops with EWMH and wmctrl support",
+    }.get(backend)
+
+def _read_command_json(command):
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=2
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "window-state query failed")
+    return json.loads(result.stdout)
+
+def _rect_covers_monitor(windows, monitor):
+    """Return true only when visible window rectangles cover the whole output."""
+    mx, my, mw, mh = monitor
+    if mw <= 0 or mh <= 0:
+        return False
+    right, bottom = mx + mw, my + mh
+    clipped = []
+    xs = {mx, right}
+    for rect in windows:
+        if not rect or len(rect) != 4:
+            continue
+        x, y, width, height = rect
+        left = max(mx, x)
+        top = max(my, y)
+        r = min(right, x + width)
+        b = min(bottom, y + height)
+        if r <= left or b <= top:
+            continue
+        clipped.append((left, top, r, b))
+        xs.add(left)
+        xs.add(r)
+
+    edges = sorted(xs)
+    for left, right_edge in zip(edges, edges[1:]):
+        if right_edge <= left:
+            continue
+        midpoint = (left + right_edge) / 2
+        spans = sorted(
+            (top, bottom_edge)
+            for x1, top, x2, bottom_edge in clipped
+            if x1 <= midpoint < x2
+        )
+        covered_to = my
+        for top, bottom_edge in spans:
+            if top > covered_to:
+                break
+            covered_to = max(covered_to, bottom_edge)
+            if covered_to >= bottom:
+                break
+        if covered_to < bottom:
+            return False
+    return True
+
+def _sway_covered_outputs():
+    tree = _read_command_json(["swaymsg", "-r", "-t", "get_tree"])
+    all_outputs, covered_outputs = {}, set()
+
+    def collect(node, rectangles, full_screen):
+        node_type = node.get("type")
+        if node_type == "workspace" and not node.get("visible", False):
+            return
+        if node.get("fullscreen_mode", 0):
+            full_screen[0] = True
+        children = node.get("nodes", []) + node.get("floating_nodes", [])
+        if node_type in ("con", "floating_con") and not children:
+            rect = node.get("rect", {})
+            if rect.get("width", 0) and rect.get("height", 0):
+                rectangles.append((rect.get("x", 0), rect.get("y", 0),
+                                   rect["width"], rect["height"]))
+        for child in children:
+            collect(child, rectangles, full_screen)
+
+    for output in tree.get("nodes", []):
+        if output.get("type") != "output" or not output.get("active", True):
+            continue
+        name = output.get("name")
+        rect = output.get("rect", {})
+        if not name or not rect.get("width") or not rect.get("height"):
+            continue
+        bounds = (rect.get("x", 0), rect.get("y", 0), rect["width"], rect["height"])
+        all_outputs[name] = bounds
+        rectangles, full_screen = [], [False]
+        for workspace in output.get("nodes", []):
+            collect(workspace, rectangles, full_screen)
+        if full_screen[0] or _rect_covers_monitor(rectangles, bounds):
+            covered_outputs.add(name)
+    return all_outputs, covered_outputs
+
+def _hyprland_covered_outputs():
+    monitors = _read_command_json(["hyprctl", "-j", "monitors"])
+    clients = _read_command_json(["hyprctl", "-j", "clients"])
+    all_outputs, covered_outputs = {}, set()
+    for monitor in monitors:
+        if monitor.get("disabled"):
+            continue
+        name = monitor.get("name")
+        bounds = (monitor.get("x", 0), monitor.get("y", 0),
+                  monitor.get("width", 0), monitor.get("height", 0))
+        if not name or bounds[2] <= 0 or bounds[3] <= 0:
+            continue
+        all_outputs[name] = bounds
+        active_workspace = (monitor.get("activeWorkspace") or {}).get("id")
+        rectangles, full_screen = [], False
+        for client in clients:
+            if client.get("monitor") != monitor.get("id"):
+                continue
+            if client.get("hidden") or client.get("mapped") is False:
+                continue
+            workspace = client.get("workspace") or {}
+            if not client.get("pinned") and active_workspace is not None \
+                    and workspace.get("id") != active_workspace:
+                continue
+            fullscreen = client.get("fullscreen", 0)
+            if fullscreen == 2:
+                full_screen = True
+            at = client.get("at", [])
+            size = client.get("size", [])
+            if len(at) >= 2 and len(size) >= 2:
+                rectangles.append((at[0], at[1], size[0], size[1]))
+        if full_screen or _rect_covers_monitor(rectangles, bounds):
+            covered_outputs.add(name)
+    return all_outputs, covered_outputs
+
+def _x11_covered_outputs():
+    """Use EWMH/X11 window properties to detect windows covering each output."""
+    root = subprocess.run(
+        ["xprop", "-root", "_NET_CURRENT_DESKTOP"],
+        capture_output=True, text=True, timeout=3, check=True,
+    ).stdout
+    desktop_match = re.search(r"_NET_CURRENT_DESKTOP\([^)]*\)\s*=\s*(\d+)", root)
+    if not desktop_match:
+        raise RuntimeError("The X11 window manager does not expose the current EWMH desktop")
+    current_desktop = int(desktop_match.group(1))
+    windows_result = subprocess.run(
+        ["wmctrl", "-lG"], capture_output=True, text=True, timeout=3, check=True,
+    )
+
+    monitor_result = subprocess.run(
+        ["xrandr", "--listmonitors"], capture_output=True, text=True,
+        timeout=3, check=True,
+    )
+    all_outputs = {}
+    monitor_re = re.compile(
+        r"^\s*\d+:\s+\S+\s+(\d+)/\d+x(\d+)/\d+([+-]\d+)([+-]\d+)\s+(\S+)"
+    )
+    for line in monitor_result.stdout.splitlines():
+        match = monitor_re.match(line)
+        if not match:
+            continue
+        width, height, x, y, name = match.groups()
+        all_outputs[name] = (int(x), int(y), int(width), int(height))
+    if not all_outputs:
+        raise RuntimeError("XRandR did not report monitor geometry")
+
+    rectangles = []
+    for line in windows_result.stdout.splitlines():
+        fields = line.split(None, 7)
+        if len(fields) < 7:
+            continue
+        try:
+            desktop = int(fields[1], 0)
+            x, y, width, height = map(int, fields[2:6])
+        except ValueError:
+            continue
+        if (current_desktop is not None and
+                desktop not in (current_desktop, -1, 0xFFFFFFFF)):
+            continue
+        if width > 0 and height > 0:
+            rectangles.append((x, y, width, height))
+
+    covered = {
+        name for name, bounds in all_outputs.items()
+        if _rect_covers_monitor(rectangles, bounds)
+    }
+    return all_outputs, covered
+
+def get_smart_pause_covered_outputs(backend=None):
+    backend = backend or detect_smart_pause_backend()
+    if backend == "hyprland":
+        return _hyprland_covered_outputs()
+    if backend == "sway":
+        return _sway_covered_outputs()
+    if backend == "x11":
+        return _x11_covered_outputs()
+    return None
+
+def start_smart_pause_daemon():
+    if not detect_smart_pause_backend():
+        return
+    try:
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--smart-pause-daemon"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True,
+        )
+    except Exception as e:
+        print(f"[papyrus] failed to start smart-pause service: {e}")
+
+def run_smart_pause_daemon():
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    lock = SMART_PAUSE_LOCK.open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return
+
+    paused = {}
+    stop_requested = False
+
+    def request_stop(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+
+    old_term = signal.signal(signal.SIGTERM, request_stop)
+    old_int = signal.signal(signal.SIGINT, request_stop)
+    try:
+        while not stop_requested:
+            cfg = load_config()
+            if not cfg.get("smart_pause", False):
+                break
+            try:
+                snapshot = get_smart_pause_covered_outputs()
+            except Exception as e:
+                print(f"[papyrus] smart-pause state query failed: {e}")
+                snapshot = None
+
+            discover_mpvpaper_pids()
+            processes = dict(_mpvpaper_pids)
+            if snapshot is None:
+                should_pause = {}
+            else:
+                active_outputs, covered = snapshot
+                any_covered = bool(active_outputs) and bool(covered)
+                should_pause = {
+                    # A single wildcard mpvpaper process serves every monitor.
+                    # Pause it when a fullscreen/covering window occupies any
+                    # output, so fullscreen games on one monitor still save
+                    # decode resources in the common all-monitors mode.
+                    output: (any_covered if output == "*" else output in covered)
+                    for output in processes
+                }
+
+            for output, pid in list(paused.items()):
+                if processes.get(output) != pid or not should_pause.get(output, False):
+                    try:
+                        os.kill(pid, signal.SIGCONT)
+                    except ProcessLookupError:
+                        pass
+                    paused.pop(output, None)
+
+            for output, pid in processes.items():
+                if should_pause.get(output, False) and paused.get(output) != pid:
+                    try:
+                        os.kill(pid, signal.SIGSTOP)
+                        paused[output] = pid
+                        print(f"[papyrus] smart-pause: paused {output} (fullscreen-or-covered)")
+                    except ProcessLookupError:
+                        pass
+            time.sleep(1)
+    finally:
+        for pid in paused.values():
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
+        signal.signal(signal.SIGTERM, old_term)
+        signal.signal(signal.SIGINT, old_int)
 
 def apply_wallpaper(path: str, output: str, scaling="fit"):
     # Re-discover first: the existing wallpaper may have been launched by the
@@ -254,6 +561,10 @@ def write_autostart_script(wallpapers: dict, scaling: dict) -> Path:
         executable = shlex.quote(str(Path(__file__).resolve()))
         python = shlex.quote(sys.executable)
         lines.append(f"{python} {executable} --rotation-daemon &")
+    if load_config().get("smart_pause", False) and detect_smart_pause_backend():
+        executable = shlex.quote(str(Path(__file__).resolve()))
+        python = shlex.quote(sys.executable)
+        lines.append(f"{python} {executable} --smart-pause-daemon &")
     script.write_text("\n".join(lines) + "\n")
     script.chmod(0o755)
     return script
@@ -519,6 +830,37 @@ def get_thumb_blurred(thumb: Path, radius=18) -> Path:
     except Exception as e:
         print(f"[papyrus] failed to generate blurred thumbnail {blurred}: {e}", file=sys.stderr)
         return thumb
+
+def get_fallback_backdrop(radius=18) -> Path:
+    """Create a soft, wallpaper-independent image for the frosted-glass UI."""
+    fallback = CONFIG_DIR / "thumbs" / "papyrus_frosted_fallback_v2.jpg"
+    if not fallback.exists():
+        try:
+            from PIL import Image, ImageDraw
+
+            width, height = 960, 640
+            image = Image.new("RGB", (width, height))
+            pixels = image.load()
+            top = (32, 39, 67)
+            bottom = (75, 43, 82)
+            for y in range(height):
+                t = y / (height - 1)
+                color = tuple(round(a * (1 - t) + b * t) for a, b in zip(top, bottom))
+                for x in range(width):
+                    pixels[x, y] = color
+
+            shapes = Image.new("RGBA", (width, height))
+            draw = ImageDraw.Draw(shapes)
+            draw.ellipse((-220, -180, 470, 510), fill=(75, 145, 179, 180))
+            draw.ellipse((430, 170, 1160, 900), fill=(174, 91, 150, 150))
+            draw.ellipse((160, 300, 770, 910), fill=(90, 94, 173, 125))
+            image = Image.alpha_composite(image.convert("RGBA"), shapes)
+            fallback.parent.mkdir(parents=True, exist_ok=True)
+            image.convert("RGB").save(fallback, "JPEG", quality=88)
+        except Exception as e:
+            print(f"[papyrus] fallback backdrop creation failed: {e}")
+            return None
+    return get_thumb_blurred(fallback, radius)
 
 def get_video_resolution(path: Path) -> str:
     try:
@@ -1151,6 +1493,8 @@ class CWApp(Adw.Application):
                 sc_map = self.cfg.setdefault("scaling", {})
                 sc_map.setdefault(out, "fit")
             self.cfg.setdefault("current", None)
+        if self.cfg.get("smart_pause", False):
+            start_smart_pause_daemon()
             save_config(self.cfg)
             wallpapers = running
         elif not wallpapers and self.cfg.get("current"):
@@ -1372,6 +1716,39 @@ class CWApp(Adw.Application):
         blur_box.append(self.glass_blur_scale)
         gen_box.append(blur_box)
 
+        backdrop_box = Gtk.Box(spacing=16)
+        backdrop_box.add_css_class("settings-row")
+        backdrop_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        backdrop_lbl = Gtk.Label(label="App Backdrop", xalign=0)
+        backdrop_lbl.add_css_class("control-label")
+        backdrop_desc = Gtk.Label(
+            label="Choose the image shown behind Papyrus's frosted-glass panels.",
+            xalign=0, wrap=True,
+        )
+        backdrop_desc.add_css_class("status-label")
+        backdrop_desc.add_css_class("settings-desc")
+        backdrop_text.append(backdrop_lbl)
+        backdrop_text.append(backdrop_desc)
+        backdrop_box.append(backdrop_text)
+
+        backdrop_controls = Gtk.Box(spacing=8)
+        self.backdrop_source_dd = Gtk.DropDown.new_from_strings(
+            ["Active wallpaper", "Generated fallback", "Custom image"]
+        )
+        source_idx = {"wallpaper": 0, "fallback": 1, "custom": 2}.get(
+            self.cfg.get("backdrop_source", "wallpaper"), 0
+        )
+        self.backdrop_source_dd.set_selected(source_idx)
+        self.backdrop_source_dd.connect("notify::selected", self._on_backdrop_source_changed)
+        backdrop_controls.append(self.backdrop_source_dd)
+
+        self.backdrop_choose_btn = Gtk.Button(label="Choose Image")
+        self.backdrop_choose_btn.connect("clicked", self._choose_backdrop_image)
+        self.backdrop_choose_btn.set_visible(source_idx == 2)
+        backdrop_controls.append(self.backdrop_choose_btn)
+        backdrop_box.append(backdrop_controls)
+        gen_box.append(backdrop_box)
+
         # Start on Login row
         login_box = Gtk.Box(spacing=16)
         login_box.add_css_class("settings-row")
@@ -1414,6 +1791,45 @@ class CWApp(Adw.Application):
 
         gen_box.append(out_box)
         page.append(gen_box)
+
+        # Resource Control section
+        resource_title = Gtk.Label(label="Resource Control", margin_top=28)
+        resource_title.add_css_class("settings-section-title")
+        resource_title.set_halign(Gtk.Align.START)
+        page.append(resource_title)
+        resource_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        resource_box.add_css_class("settings-group-container")
+        smart_pause_box = Gtk.Box(spacing=16)
+        smart_pause_box.add_css_class("settings-row")
+        smart_pause_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=2, hexpand=True)
+        smart_pause_lbl = Gtk.Label(label="Smart Auto-Pause", xalign=0)
+        smart_pause_lbl.add_css_class("control-label")
+        backend = detect_smart_pause_backend()
+        if backend:
+            backend_note = smart_pause_backend_name(backend)
+            smart_pause_description = (
+                f"Pause wallpaper playback when windows fully cover a display or a fullscreen game is active. "
+                f"Window detection is available on {backend_note}."
+            )
+        else:
+            smart_pause_description = (
+                "Pause wallpaper playback when windows fully cover a display. Window detection is currently "
+                "available on Sway, Hyprland, and X11 sessions with wmctrl support."
+            )
+        self.smart_pause_desc = Gtk.Label(label=smart_pause_description,
+                                          xalign=0, wrap=True)
+        self.smart_pause_desc.add_css_class("status-label")
+        self.smart_pause_desc.add_css_class("settings-desc")
+        smart_pause_text.append(smart_pause_lbl)
+        smart_pause_text.append(self.smart_pause_desc)
+        smart_pause_box.append(smart_pause_text)
+        self.smart_pause_sw = Gtk.Switch(active=self.cfg.get("smart_pause", False))
+        self.smart_pause_sw.set_valign(Gtk.Align.CENTER)
+        self.smart_pause_sw.connect("notify::active", self._on_smart_pause_toggled)
+        smart_pause_box.append(self.smart_pause_sw)
+        resource_box.append(smart_pause_box)
+        page.append(resource_box)
 
         page.append(Gtk.Label(label="", margin_top=32))
 
@@ -2083,27 +2499,77 @@ class CWApp(Adw.Application):
             self.header_backdrop.set_paintable(None)
             self.sidebar_backdrop.set_paintable(None)
             return
-        if not path or not Path(path).exists():
-            print("[papyrus] backdrop not set: no active wallpaper file")
-            self.app_backdrop.set_paintable(None)
-            self.header_backdrop.set_paintable(None)
-            self.sidebar_backdrop.set_paintable(None)
-            return
-        thumb = get_thumb_large(Path(path))
-        if thumb.exists():
-            blurred = get_thumb_blurred(thumb, self.cfg.get("glass_blur", 18))
-            print(
-                f"[papyrus] backdrop thumbnail selected: {blurred.name} "
-                f"(exists={blurred.exists()}, blur={self.cfg.get('glass_blur', 18)})"
-            )
-            self.app_backdrop.set_filename(str(blurred))
-            self.header_backdrop.set_filename(str(blurred))
-            self.sidebar_backdrop.set_filename(str(blurred))
+        source = self.cfg.get("backdrop_source", "wallpaper")
+        source_path = path
+        backdrop = None
+        if source == "fallback":
+            backdrop = get_fallback_backdrop(self.cfg.get("glass_blur", 18))
         else:
-            print("[papyrus] backdrop not set: source thumbnail was not created")
+            if source == "custom":
+                source_path = self.cfg.get("backdrop_custom")
+            if source_path and Path(source_path).exists():
+                thumb = get_thumb_large(Path(source_path))
+                if thumb.exists():
+                    backdrop = get_thumb_blurred(thumb, self.cfg.get("glass_blur", 18))
+
+        if not backdrop or not backdrop.exists():
+            backdrop = get_fallback_backdrop(self.cfg.get("glass_blur", 18))
+            print("[papyrus] using generated fallback backdrop")
+
+        if backdrop and backdrop.exists():
+            self.app_backdrop.set_filename(str(backdrop))
+            self.header_backdrop.set_filename(str(backdrop))
+            self.sidebar_backdrop.set_filename(str(backdrop))
+        else:
+            print("[papyrus] no backdrop image available")
             self.app_backdrop.set_paintable(None)
             self.header_backdrop.set_paintable(None)
             self.sidebar_backdrop.set_paintable(None)
+
+    def _on_backdrop_source_changed(self, dropdown, _param):
+        sources = ["wallpaper", "fallback", "custom"]
+        selected = dropdown.get_selected()
+        if selected >= len(sources):
+            return
+        source = sources[selected]
+        self.cfg["backdrop_source"] = source
+        self.backdrop_choose_btn.set_visible(source == "custom")
+        save_config(self.cfg)
+        if source == "custom" and not self.cfg.get("backdrop_custom"):
+            self._refresh_app_backdrop()
+            self._choose_backdrop_image(None)
+        else:
+            self._refresh_app_backdrop()
+
+    def _choose_backdrop_image(self, _button):
+        dialog = Gtk.FileDialog(title="Choose app backdrop image")
+        image_filter = Gtk.FileFilter()
+        image_filter.set_name("Images")
+        for extension in IMAGE_EXTS:
+            image_filter.add_pattern(f"*{extension}")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(image_filter)
+        dialog.set_filters(filters)
+        dialog.open(self.win, None, self._backdrop_image_chosen)
+
+    def _backdrop_image_chosen(self, dialog, result):
+        try:
+            image = dialog.open_finish(result)
+            path = image.get_path()
+            if not path or Path(path).suffix.lower() not in IMAGE_EXTS:
+                return
+            self.cfg["backdrop_custom"] = path
+            self.cfg["backdrop_source"] = "custom"
+            save_config(self.cfg)
+            self._refresh_app_backdrop()
+        except Exception:
+            pass
+
+    def _refresh_app_backdrop(self):
+        current = self.cfg.get("current") or next(
+            iter((self.cfg.get("wallpapers", {}) or {}).values()), None
+        )
+        self._set_app_backdrop(current)
 
     def _on_frosted_glass_toggled(self, switch, _param):
         self.cfg["frosted_glass"] = switch.get_active()
@@ -2205,6 +2671,31 @@ class CWApp(Adw.Application):
             write_autostart(wallpapers, self.cfg.get("scaling", {}))
         else:
             remove_autostart()
+
+    def _on_smart_pause_toggled(self, sw, _param):
+        active = sw.get_active()
+        self.cfg["smart_pause"] = active
+        save_config(self.cfg)
+        backend = detect_smart_pause_backend()
+        if active and backend:
+            start_smart_pause_daemon()
+            backend_name = smart_pause_backend_name(backend)
+            self.smart_pause_desc.set_text(
+                f"Pause wallpaper playback when windows fully cover a display or a fullscreen game is active. "
+                f"Window detection is available on {backend_name}."
+            )
+        elif active:
+            self.smart_pause_desc.set_text(
+                "Enabled, but window detection is unavailable in this desktop session. "
+                "Supported paths currently include Sway, Hyprland, and X11 sessions with wmctrl support."
+            )
+        else:
+            self.smart_pause_desc.set_text(
+                "Pause wallpaper playback when windows fully cover a display. Window detection is currently "
+                "available on Sway, Hyprland, and X11 sessions with wmctrl support."
+            )
+        if self.autostart_sw.get_active():
+            write_autostart(self.cfg.get("wallpapers", {}), self.cfg.get("scaling", {}))
 
     def _on_theme_toggle(self, sw, _param):
         self.cfg["auto_theme"] = sw.get_active()
@@ -2351,6 +2842,9 @@ class CWApp(Adw.Application):
 if __name__ == "__main__":
     if "--rotation-daemon" in sys.argv:
         run_rotation_daemon()
+        raise SystemExit(0)
+    if "--smart-pause-daemon" in sys.argv:
+        run_smart_pause_daemon()
         raise SystemExit(0)
     if not shutil.which("mpvpaper") and not Path("/app/bin/mpvpaper").exists():
         print("mpvpaper not found. Install it first.")
