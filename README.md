@@ -55,8 +55,7 @@ Supports: Pop, Ubuntu, Debian, Fedora, openSUSE. Arch-based users should use the
 ### Fedora COPR
 
 RPM packaging recipes for Papyrus and its `mpvpaper` dependency are in
-[`packaging/fedora`](packaging/fedora). The COPR repository is not published
-yet; maintainers can use that directory to build and submit both packages.
+[`packaging/fedora`](packaging/fedora). This is the COPR repository: https://copr.fedorainfracloud.org/coprs/psgtatitos/papyrus/.
 
 AUR (Arch Linux / CachyOS / Manjaro)
 Install from the AUR using your preferred AUR helper:
